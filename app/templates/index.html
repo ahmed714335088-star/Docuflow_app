@@ -51,7 +51,13 @@
 
             <div class="settings-grid">
               <div class="setting-block"><label class="field-label">أبعاد الفيديو</label><div class="ratio-options" role="group" aria-label="نسبة العرض"><button type="button" class="ratio-option selected" data-ratio="16:9"><span class="ratio-icon landscape"></span><span><strong>يوتيوب</strong><small>أفقي · 16:9</small></span><span class="radio-dot"></span></button><button type="button" class="ratio-option" data-ratio="9:16"><span class="ratio-icon portrait"></span><span><strong>Shorts</strong><small>عمودي · 9:16</small></span><span class="radio-dot"></span></button></div></div>
-              <div class="setting-block"><label class="field-label" for="voice">صوت الراوي <span>إنجليزي</span></label><div class="select-wrap"><select id="voice"><option value="en-US-ChristopherNeural">Christopher · عميق وهادئ</option><option value="en-US-GuyNeural">Guy · وثائقي رصين</option><option value="en-US-AndrewNeural">Andrew · دافئ وواضح</option><option value="en-US-BrianNeural">Brian · منخفض ومتزن</option><option value="en-US-EricNeural">Eric · سرد سينمائي</option></select><span class="select-arrow">⌄</span></div><p class="field-hint">قد تختلف الأصوات المتاحة حسب خدمة edge-tts.</p></div>
+              <div class="setting-block">
+                <label class="field-label" for="video-language">لغة الفيديو</label>
+                <div class="select-wrap language-select"><select id="video-language"><option value="en">English · الإنجليزية</option><option value="ar">العربية · Arabic</option></select><span class="select-arrow">⌄</span></div>
+                <label class="field-label voice-label" for="voice">صوت الراوي <span id="voice-language-tag">إنجليزي</span></label>
+                <div class="select-wrap"><select id="voice"><option value="en-US-ChristopherNeural">Christopher · عميق وهادئ</option><option value="en-US-GuyNeural">Guy · وثائقي رصين</option><option value="en-US-AndrewNeural">Andrew · دافئ وواضح</option><option value="en-US-BrianNeural">Brian · منخفض ومتزن</option><option value="en-US-EricNeural">Eric · سرد سينمائي</option></select><span class="select-arrow">⌄</span></div>
+                <p class="field-hint" id="voice-hint">صوت إنجليزي للراوي؛ تتبدل القائمة تلقائياً مع لغة الفيديو.</p>
+              </div>
             </div>
 
             <div class="provider-row"><div><span class="field-label">محرك كتابة النص</span><p>اختر خدمة ذكاء اصطناعي، أو ابدأ بالوضع التجريبي.</p></div><div class="provider-select"><label><input type="radio" name="provider" value="demo" checked><span>تجريبي</span></label><label><input type="radio" name="provider" value="groq"><span>Groq</span></label><label><input type="radio" name="provider" value="gemini"><span>Gemini</span></label></div></div>

@@ -42,14 +42,15 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
             global_progress = int(((topic_index + number / len(STAGES)) / total) * 100)
             await report(status="running", progress=min(global_progress, 99), stage=STAGES[number][0], message=f"{topic}: {message}")
 
-        await step(0, "نكتب سيناريو المشاهد والخطاف والترجمة العربية.")
-        script = await generate_script(topic, request.provider, keys)
+        language_name = "العربية" if request.video_language == "ar" else "الإنجليزية"
+        await step(0, f"نكتب سيناريو المشاهد والخطاف باللغة {language_name}.")
+        script = await generate_script(topic, request.provider, keys, request.video_language)
         scenes = script["scenes"]
         audio_paths: list[Path] = []
         for number, scene in enumerate(scenes, start=1):
-            await step(1, f"إنشاء صوت المشهد {number} من {len(scenes)} بصوت {request.voice}.")
+            await step(1, f"إنشاء الصوت {language_name} للمشهد {number} من {len(scenes)} بصوت {request.voice}.")
             audio_path = work / f"voice_{number:02d}.mp3"
-            await make_voiceover(scene["narration_en"], request.voice, audio_path)
+            await make_voiceover(scene["narration"], request.voice, audio_path)
             audio_paths.append(audio_path)
 
         await step(2, "البحث عن لقطات مطابقة لكلمات المشاهد.")
@@ -73,11 +74,12 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
             await asyncio.to_thread(prepare_scene_video, source, scene["visual_keywords"], video_path, request.aspect_ratio, duration, number, work)
             scene_videos.append(video_path)
 
-        await step(3, "يفرّغ faster-whisper الصوت الإنجليزي ويحدد توقيت كل ترجمة عربية.")
+        await step(3, f"يفرّغ faster-whisper الصوت {language_name} ويحدد توقيت كل ترجمة عربية.")
         captions: list[dict[str, Any]] = []
         offset = 0.0
         for scene, audio_path, duration in zip(scenes, audio_paths, durations):
-            start, end, _transcript = await asyncio.to_thread(transcribe_bounds, audio_path, request.whisper_model)
+            whisper_language = "ar" if request.video_language == "ar" else "en"
+            start, end, _transcript = await asyncio.to_thread(transcribe_bounds, audio_path, request.whisper_model, whisper_language)
             cue_start = max(0.0, offset + max(0.0, start - 0.12))
             cue_end = min(offset + duration, offset + min(duration, max(start + 0.55, end + 0.38)))
             if cue_end <= cue_start:
@@ -103,8 +105,10 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
             "title": script.get("title", topic),
             "hook": script.get("hook", ""),
             "aspect_ratio": request.aspect_ratio,
+            "video_language": request.video_language,
             "voice": request.voice,
             "provider": request.provider,
+            "script_model": script.get("model", ""),
             "demo": bool(script.get("demo")),
             "visual_source": visual_note,
             "created_at": datetime.now(timezone.utc).isoformat(),

@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ApiKeys(BaseModel):
@@ -12,6 +12,7 @@ class ApiKeys(BaseModel):
 class GenerateRequest(BaseModel):
     topics: str = Field(min_length=3, max_length=3000)
     aspect_ratio: Literal["16:9", "9:16"] = "16:9"
+    video_language: Literal["en", "ar"] = "en"
     voice: str = "en-US-ChristopherNeural"
     provider: Literal["demo", "groq", "gemini"] = "demo"
     keys: ApiKeys = Field(default_factory=ApiKeys)
@@ -30,3 +31,19 @@ class GenerateRequest(BaseModel):
         if len(topics) > 8:
             raise ValueError("الحد الأقصى 8 موضوعات في الدفعة الواحدة.")
         return "\n".join(topics)
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_voice_for_language(cls, values: object) -> object:
+        if isinstance(values, dict) and not values.get("voice"):
+            language = values.get("video_language", "en")
+            values["voice"] = "ar-EG-ShakirNeural" if language == "ar" else "en-US-ChristopherNeural"
+        return values
+
+    @model_validator(mode="after")
+    def validate_voice_language(self) -> "GenerateRequest":
+        locale = self.voice.split("-", 1)[0].lower()
+        if locale != self.video_language:
+            language_name = "العربية" if self.video_language == "ar" else "الإنجليزية"
+            raise ValueError(f"اختر صوتاً باللغة {language_name} ليتوافق مع لغة الفيديو.")
+        return self

@@ -66,11 +66,11 @@ def _ensure_pyav_compatibility() -> None:
     _PYAV_COMPAT_PATCHED = True
 
 
-def transcribe_bounds(path: Path, model_size: str = "tiny") -> tuple[float, float, str]:
+def transcribe_bounds(path: Path, model_size: str = "tiny", language: str = "en") -> tuple[float, float, str]:
     try:
         _ensure_pyav_compatibility()
         model = _whisper_model(model_size)
-        segments, _info = model.transcribe(str(path), beam_size=1, vad_filter=True, language="en")
+        segments, _info = model.transcribe(str(path), beam_size=1, vad_filter=True, language=language)
         points = [(float(segment.start), float(segment.end), str(segment.text).strip()) for segment in segments]
         if not points:
             return 0.0, audio_duration(path), ""

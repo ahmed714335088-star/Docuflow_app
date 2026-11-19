@@ -2,9 +2,9 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const stageOrder = ["script", "voice", "visuals", "subtitles", "render"];
+  const keyIds = ["groq-key", "gemini-key", "pixabay-key"];
   let aspectRatio = "16:9";
   let toastTimer;
-  const keyIds = ["groq-key", "gemini-key", "pixabay-key"];
 
   function toast(message, error = false) {
     const box = $("#toast");
@@ -17,6 +17,34 @@
 
   function keysFromInputs() {
     return { groq: $("#groq-key").value.trim(), gemini: $("#gemini-key").value.trim(), pixabay: $("#pixabay-key").value.trim() };
+  }
+
+  function updateVoiceOptions(preferredVoice = "") {
+    const language = $("#video-language").value;
+    const voices = language === "ar"
+      ? [
+          ["ar-EG-ShakirNeural", "Shakir · مصري، وثائقي"],
+          ["ar-SA-HamedNeural", "Hamed · سعودي، رصين"],
+        ]
+      : [
+          ["en-US-ChristopherNeural", "Christopher · عميق وهادئ"],
+          ["en-US-GuyNeural", "Guy · وثائقي رصين"],
+          ["en-US-AndrewNeural", "Andrew · دافئ وواضح"],
+          ["en-US-BrianNeural", "Brian · منخفض ومتزن"],
+          ["en-US-EricNeural", "Eric · سرد سينمائي"],
+        ];
+    const select = $("#voice");
+    select.replaceChildren(...voices.map(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      return option;
+    }));
+    select.value = voices.some(([value]) => value === preferredVoice) ? preferredVoice : voices[0][0];
+    $("#voice-language-tag").textContent = language === "ar" ? "عربي" : "إنجليزي";
+    $("#voice-hint").textContent = language === "ar"
+      ? "أصوات عربية طبيعية؛ اختر اللهجة المصرية أو السعودية."
+      : "أصوات إنجليزية طبيعية؛ تتبدل القائمة تلقائياً مع لغة الفيديو.";
   }
 
   function loadSettings() {
@@ -33,13 +61,19 @@
         const radio = $(`input[name="provider"][value="${values.provider}"]`);
         if (radio) radio.checked = true;
       }
-      if (values.voice) $("#voice").value = values.voice;
+      $("#video-language").value = values.video_language === "ar" ? "ar" : "en";
+      updateVoiceOptions(values.voice || "");
       updateProviderHint();
     } catch (_) { /* Ignore invalid browser-local preferences. */ }
   }
 
   function saveSettings(showToast = true) {
-    const values = { ...keysFromInputs(), provider: selectedProvider(), voice: $("#voice").value };
+    const values = {
+      ...keysFromInputs(),
+      provider: selectedProvider(),
+      video_language: $("#video-language").value,
+      voice: $("#voice").value,
+    };
     localStorage.setItem("docuflow.keys.v1", JSON.stringify(values));
     $("#settings-feedback").textContent = "حُفظت الإعدادات في هذا المتصفح.";
     if (showToast) toast("حُفظت إعدادات هذا المتصفح.");
@@ -51,9 +85,10 @@
   function updateProviderHint() {
     const provider = selectedProvider();
     const note = $("#provider-hint");
-    if (provider === "demo") note.lastElementChild.textContent = "الوضع التجريبي لا يحتاج مفتاحاً؛ يستخدم سيناريو جاهزاً لإنشاء الصوت والترجمة ومعاينة الواجهة.";
-    if (provider === "groq") note.lastElementChild.textContent = keysFromInputs().groq ? "سيُنشأ النص والترجمة عبر Groq. أضف مفتاح Pixabay اختيارياً لجلب لقطات حقيقية." : "أضف مفتاح Groq من صفحة الإعدادات قبل البدء. Pixabay اختياري ويمكن استخدام خلفيات محلية.";
-    if (provider === "gemini") note.lastElementChild.textContent = keysFromInputs().gemini ? "سيُنشأ النص والترجمة عبر Gemini. أضف مفتاح Pixabay اختيارياً لجلب لقطات حقيقية." : "أضف مفتاح Gemini من صفحة الإعدادات قبل البدء. Pixabay اختياري ويمكن استخدام خلفيات محلية.";
+    const language = $("#video-language").value === "ar" ? "العربية" : "الإنجليزية";
+    if (provider === "demo") note.lastElementChild.textContent = `الوضع التجريبي لا يحتاج مفتاحاً؛ يستخدم سيناريو جاهزاً باللغة ${language} لاختبار الصوت والترجمة والواجهة.`;
+    if (provider === "groq") note.lastElementChild.textContent = keysFromInputs().groq ? `سيُنشأ السيناريو باللغة ${language} عبر Groq. أضف مفتاح Pixabay اختيارياً لجلب لقطات حقيقية.` : "أضف مفتاح Groq من صفحة الإعدادات قبل البدء. Pixabay اختياري ويمكن استخدام خلفيات محلية.";
+    if (provider === "gemini") note.lastElementChild.textContent = keysFromInputs().gemini ? `سيُنشأ السيناريو باللغة ${language} عبر Gemini مع اختيار تلقائي لنموذج مجاني متاح. أضف مفتاح Pixabay اختيارياً لجلب لقطات حقيقية.` : "أضف مفتاح Gemini من صفحة الإعدادات قبل البدء. Pixabay اختياري ويمكن استخدام خلفيات محلية.";
   }
 
   function navigate(name) {
@@ -112,7 +147,8 @@
     $("#result-title").textContent = result.title || result.topic || "فيديو وثائقي";
     const mins = Math.floor(Number(result.duration_seconds || 0) / 60);
     const secs = Math.round(Number(result.duration_seconds || 0) % 60);
-    $("#result-meta").textContent = `${result.aspect_ratio || "16:9"} · ${mins}:${String(secs).padStart(2, "0")} · ${result.voice || "edge-tts"}`;
+    const language = result.video_language === "ar" ? "عربي" : "English";
+    $("#result-meta").textContent = `${language} · ${result.aspect_ratio || "16:9"} · ${mins}:${String(secs).padStart(2, "0")} · ${result.voice || "edge-tts"}`;
     $("#result-source").textContent = result.demo ? "وضع تجريبي · لقطات محلية" : (result.visual_source || "تم الإنتاج");
     $("#result-section").hidden = false;
     $("#result-section").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -169,6 +205,7 @@
         body: JSON.stringify({
           topics,
           aspect_ratio: aspectRatio,
+          video_language: $("#video-language").value,
           voice: $("#voice").value,
           provider,
           keys: keysFromInputs(),
@@ -207,7 +244,8 @@
         const meta = document.createElement("p");
         const date = item.created_at ? new Date(item.created_at).toLocaleDateString("ar", { year: "numeric", month: "short", day: "numeric" }) : "";
         const mb = (Number(item.size_bytes || 0) / 1048576).toFixed(1);
-        meta.textContent = `${date} · ${item.aspect_ratio || "16:9"} · ${mb} MB`;
+        const language = item.video_language === "ar" ? "عربي" : "English";
+        meta.textContent = `${date} · ${language} · ${item.aspect_ratio || "16:9"} · ${mb} MB`;
         const actions = document.createElement("div"); actions.className = "history-actions";
         const play = document.createElement("button"); play.type = "button"; play.textContent = "معاينة"; play.addEventListener("click", () => { navigate("studio"); displayResult(item); });
         const download = document.createElement("a"); download.href = `/api/download/${encodeURIComponent(item.filename)}`; download.download = item.filename; download.textContent = "تنزيل MP4";
@@ -220,18 +258,23 @@
   $("#settings-shortcut").addEventListener("click", () => navigate("settings"));
   $("#generate-button").addEventListener("click", generate);
   $("#show-history").addEventListener("click", () => navigate("history"));
-  $$("[data-open-studio]").forEach(button => button.addEventListener("click", () => navigate("studio")));
+  $$('[data-open-studio]').forEach(button => button.addEventListener("click", () => navigate("studio")));
   $$(".ratio-option").forEach(button => button.addEventListener("click", () => {
     $$(".ratio-option").forEach(option => option.classList.remove("selected"));
     button.classList.add("selected"); aspectRatio = button.dataset.ratio;
   }));
   $$('input[name="provider"]').forEach(radio => radio.addEventListener("change", () => { updateProviderHint(); saveSettings(false); }));
   keyIds.forEach(id => $(`#${id}`).addEventListener("input", updateProviderHint));
+  $("#video-language").addEventListener("change", () => {
+    updateVoiceOptions();
+    updateProviderHint();
+    saveSettings(false);
+  });
   $("#voice").addEventListener("change", () => saveSettings(false));
   $("#save-settings").addEventListener("click", () => saveSettings(true));
   $("#clear-settings").addEventListener("click", () => {
-    localStorage.removeItem("docuflow.keys.v1");
     keyIds.forEach(id => { $(`#${id}`).value = ""; });
+    saveSettings(false);
     updateProviderHint();
     $("#settings-feedback").textContent = "مُسحت المفاتيح المحفوظة.";
     toast("مُسحت المفاتيح من هذا المتصفح.");
