@@ -2,7 +2,7 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const stageOrder = ["script", "voice", "visuals", "subtitles", "render"];
-  const keyIds = ["groq-key", "gemini-key", "pixabay-key"];
+  const keyIds = ["groq-key", "gemini-key", "pixabay-key", "pollinations-key"];
   let aspectRatio = "16:9";
   let toastTimer;
 
@@ -16,7 +16,7 @@
   }
 
   function keysFromInputs() {
-    return { groq: $("#groq-key").value.trim(), gemini: $("#gemini-key").value.trim(), pixabay: $("#pixabay-key").value.trim() };
+    return { groq: $("#groq-key").value.trim(), gemini: $("#gemini-key").value.trim(), pixabay: $("#pixabay-key").value.trim(), pollinations: $("#pollinations-key").value.trim() };
   }
 
   function updateVoiceOptions(preferredVoice = "") {
@@ -57,6 +57,7 @@
       $("#groq-key").value = values.groq || "";
       $("#gemini-key").value = values.gemini || "";
       $("#pixabay-key").value = values.pixabay || "";
+      $("#pollinations-key").value = values.pollinations || "";
       if (values.provider) {
         const radio = $(`input[name="provider"][value="${values.provider}"]`);
         if (radio) radio.checked = true;
@@ -86,9 +87,17 @@
     const provider = selectedProvider();
     const note = $("#provider-hint");
     const language = $("#video-language").value === "ar" ? "العربية" : "الإنجليزية";
-    if (provider === "demo") note.lastElementChild.textContent = `الوضع التجريبي لا يحتاج مفتاحاً؛ يستخدم سيناريو جاهزاً باللغة ${language} لاختبار الصوت والترجمة والواجهة.`;
-    if (provider === "groq") note.lastElementChild.textContent = keysFromInputs().groq ? `سيُنشأ السيناريو باللغة ${language} عبر Groq. أضف مفتاح Pixabay اختيارياً لجلب لقطات حقيقية.` : "أضف مفتاح Groq من صفحة الإعدادات قبل البدء. Pixabay اختياري ويمكن استخدام خلفيات محلية.";
-    if (provider === "gemini") note.lastElementChild.textContent = keysFromInputs().gemini ? `سيُنشأ السيناريو باللغة ${language} عبر Gemini مع اختيار تلقائي لنموذج مجاني متاح. أضف مفتاح Pixabay اختيارياً لجلب لقطات حقيقية.` : "أضف مفتاح Gemini من صفحة الإعدادات قبل البدء. Pixabay اختياري ويمكن استخدام خلفيات محلية.";
+    const keys = keysFromInputs();
+    const visuals = keys.pixabay
+      ? "سيجرب Pixabay أولاً، ثم صورة Pollinations بعد موافقتك؛ وإلا يستخدم خلفية متحركة محلية."
+      : "بدون Pixabay يستخدم خلفية محلية متحركة، أو صورة Pollinations بمفتاح وموافقة صريحة.";
+    if (provider === "demo") note.lastElementChild.textContent = `الوضع التجريبي بلا خدمات نص خارجية؛ ينشئ 12 مشهداً قصيرة باللغة ${language} لاختبار الصوت والحركة والترجمة. ${visuals}`;
+    if (provider === "groq") note.lastElementChild.textContent = keys.groq ? `سيُنشأ السيناريو باللغة ${language} عبر Groq. ${visuals}` : "أضف مفتاح Groq من صفحة الإعدادات قبل البدء. يمكن استخدام فيديو Pixabay أو خلفيات متحركة محلية.";
+    if (provider === "gemini") note.lastElementChild.textContent = keys.gemini ? `سيقرأ التطبيق models.list من Google، ثم يختار نموذج generateContent نشطاً ويجرب البديل عند تعذره. ${visuals}` : "أضف مفتاح Gemini من صفحة الإعدادات قبل البدء؛ يكتشف التطبيق النماذج النشطة بدلاً من اسم ثابت.";
+    if (provider === "pollinations") note.lastElementChild.textContent = keys.pollinations ? `سيستخدم كتالوج Pollinations الحالي للنص. يتطلب المفتاح وقد يستهلك Pollen؛ فعّل مربع الموافقة لكل تشغيل. ${visuals}` : "أضف Pollinations API Key من الإعدادات؛ الخدمة تتطلب مفتاحاً وقد تستهلك Pollen، وليست keyless حالياً.";
+    const consent = $("#pollinations-consent");
+    consent.classList.toggle("is-confirmed", $("#allow-pollinations").checked);
+    consent.classList.toggle("is-required", provider === "pollinations" || $("#allow-pollinations").checked);
   }
 
   function navigate(name) {
@@ -148,8 +157,9 @@
     const mins = Math.floor(Number(result.duration_seconds || 0) / 60);
     const secs = Math.round(Number(result.duration_seconds || 0) % 60);
     const language = result.video_language === "ar" ? "عربي" : "English";
-    $("#result-meta").textContent = `${language} · ${result.aspect_ratio || "16:9"} · ${mins}:${String(secs).padStart(2, "0")} · ${result.voice || "edge-tts"}`;
-    $("#result-source").textContent = result.demo ? "وضع تجريبي · لقطات محلية" : (result.visual_source || "تم الإنتاج");
+    const sceneCount = Number(result.scene_count || (result.scenes || []).length || 0);
+    $("#result-meta").textContent = `${language} · ${result.aspect_ratio || "16:9"} · ${mins}:${String(secs).padStart(2, "0")} · ${sceneCount} مشهداً · ${result.voice || "edge-tts"} · ${result.script_model || "demo"}`;
+    $("#result-source").textContent = `${result.demo ? "وضع تجريبي · " : ""}${result.visual_source || "مرئيات متحركة"}`;
     $("#result-section").hidden = false;
     $("#result-section").scrollIntoView({ behavior: "smooth", block: "start" });
     refreshHistory();
@@ -192,6 +202,11 @@
     const provider = selectedProvider();
     if (provider === "groq" && !$("#groq-key").value.trim()) { navigate("settings"); toast("أضف مفتاح Groq أولاً.", true); return; }
     if (provider === "gemini" && !$("#gemini-key").value.trim()) { navigate("settings"); toast("أضف مفتاح Gemini أولاً.", true); return; }
+    const allowPollinations = $("#allow-pollinations").checked;
+    const pollinationsKey = $("#pollinations-key").value.trim();
+    if (provider === "pollinations" && !pollinationsKey) { navigate("settings"); toast("أضف Pollinations API Key أولاً.", true); return; }
+    if (provider === "pollinations" && !allowPollinations) { toast("فعّل مربع موافقة Pollinations لتأكيد احتمال استهلاك رصيد Pollen.", true); return; }
+    if (allowPollinations && !pollinationsKey) { navigate("settings"); toast("أضف Pollinations API Key أو ألغِ موافقة توليد الصور.", true); return; }
     const button = $("#generate-button");
     button.disabled = true;
     button.querySelector("span:nth-child(2)").textContent = "جارٍ تجهيز خط الإنتاج…";
@@ -208,6 +223,7 @@
           video_language: $("#video-language").value,
           voice: $("#voice").value,
           provider,
+          allow_pollinations: allowPollinations,
           keys: keysFromInputs(),
           whisper_model: "tiny",
           background_music: true,
@@ -215,6 +231,7 @@
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "تعذر بدء الإنتاج.");
+      if (allowPollinations) { $("#allow-pollinations").checked = false; updateProviderHint(); }
       $("#progress-message").textContent = "بدأ خط الإنتاج — جارٍ إعداد السيناريو.";
       pollJob(data.job_id);
     } catch (error) {
@@ -257,6 +274,19 @@
   $$(".nav-item").forEach(item => item.addEventListener("click", () => navigate(item.dataset.view)));
   $("#settings-shortcut").addEventListener("click", () => navigate("settings"));
   $("#generate-button").addEventListener("click", generate);
+  $("#pollinations-backup-button").addEventListener("click", () => {
+    const radio = $('input[name="provider"][value="pollinations"]');
+    radio.checked = true;
+    updateProviderHint();
+    saveSettings(false);
+    if (!keysFromInputs().pollinations) {
+      navigate("settings");
+      toast("أضف Pollinations API Key أولاً؛ التوليد يتطلب مفتاحاً ورصيداً.", true);
+    } else if (!$("#allow-pollinations").checked) {
+      $("#pollinations-consent").scrollIntoView({ behavior: "smooth", block: "center" });
+      toast("راجع التنبيه ثم وافق صراحةً إذا أردت استخدام Pollinations.");
+    }
+  });
   $("#show-history").addEventListener("click", () => navigate("history"));
   $$('[data-open-studio]').forEach(button => button.addEventListener("click", () => navigate("studio")));
   $$(".ratio-option").forEach(button => button.addEventListener("click", () => {
@@ -271,9 +301,11 @@
     saveSettings(false);
   });
   $("#voice").addEventListener("change", () => saveSettings(false));
+  $("#allow-pollinations").addEventListener("change", updateProviderHint);
   $("#save-settings").addEventListener("click", () => saveSettings(true));
   $("#clear-settings").addEventListener("click", () => {
     keyIds.forEach(id => { $(`#${id}`).value = ""; });
+    $("#allow-pollinations").checked = false;
     saveSettings(false);
     updateProviderHint();
     $("#settings-feedback").textContent = "مُسحت المفاتيح المحفوظة.";

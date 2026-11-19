@@ -6,6 +6,7 @@ __pycache__/
 !.env.example
 *.zip
 .DS_Store
+*TEMP_MPY*
 data/work/*
 !data/work/.gitkeep
 data/outputs/*

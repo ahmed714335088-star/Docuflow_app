@@ -8,6 +8,7 @@ from typing import Any
 from PIL import Image, ImageDraw, ImageFont
 
 FFMPEG = os.environ.get("FFMPEG_BINARY", "ffmpeg")
+FPS = 24
 
 
 def _run(command: list[str]) -> None:
@@ -18,12 +19,12 @@ def _run(command: list[str]) -> None:
         raise RuntimeError(f"فشل FFmpeg أثناء تجهيز الفيديو. {tail[-900:]}")
 
 
-async def make_voiceover(text: str, voice: str, destination: Path) -> None:
+async def make_voiceover(text: str, voice: str, destination: Path, rate: str = "+8%") -> None:
     import edge_tts
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
-        await edge_tts.Communicate(text=text, voice=voice, rate="-4%", pitch="-1Hz").save(str(destination))
+        await edge_tts.Communicate(text=text, voice=voice, rate=rate, pitch="-1Hz").save(str(destination))
     except Exception as exc:
         raise RuntimeError("تعذر إنشاء التعليق الصوتي عبر edge-tts. تحقق من اتصال الإنترنت واختيار الصوت.") from exc
 
@@ -92,6 +93,7 @@ def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 
 def _make_artwork(path: Path, width: int, height: int, number: int, keyword: str) -> None:
+    """Offline cinematic fallback artwork; FFmpeg later gives it continuous camera motion."""
     path.parent.mkdir(parents=True, exist_ok=True)
     palette = [(12, 24, 35), (18, 30, 41), (22, 25, 38), (15, 33, 41)]
     base = palette[(number - 1) % len(palette)]
@@ -104,8 +106,8 @@ def _make_artwork(path: Path, width: int, height: int, number: int, keyword: str
     glow = (118, 84, 43) if number % 2 else (34, 86, 104)
     for y in range(height):
         for x in range(width):
-            d = math.sqrt((x - cx) ** 2 + (y - cy) ** 2) / radius
-            strength = max(0.0, 1.0 - d) ** 2 * 0.36
+            distance = math.sqrt((x - cx) ** 2 + (y - cy) ** 2) / radius
+            strength = max(0.0, 1.0 - distance) ** 2 * 0.36
             edge = max(0.0, (y / height - 0.50)) * 0.08
             pixels[x, y] = tuple(min(255, int(base[c] * (1 - strength - edge) + glow[c] * strength)) for c in range(3))
     draw = ImageDraw.Draw(image, "RGBA")
@@ -117,23 +119,60 @@ def _make_artwork(path: Path, width: int, height: int, number: int, keyword: str
     margin = int(width * 0.07)
     draw.text((margin, int(height * 0.13)), "DOCUFLOW  /  FIELD NOTES", font=_font(max(15, int(width * 0.021))), fill=(218, 180, 108, 215))
     title = " ".join(keyword.replace(",", " ").split())[:72]
-    draw.text((margin, int(height * 0.78)), f"FRAME {number:02d}  ·  VISUAL STUDY", font=_font(max(13, int(width * 0.018))), fill=(225, 232, 235, 170))
-    draw.text((margin, int(height * 0.83)), title, font=_font(max(16, int(width * 0.024))), fill=(246, 245, 236, 235))
+    # Keep the lower third clear for burned-in Arabic captions.
+    draw.text((margin, int(height * 0.65)), f"SCENE {number:02d}  ·  MOTION STUDY", font=_font(max(13, int(width * 0.018))), fill=(225, 232, 235, 170))
+    draw.text((margin, int(height * 0.71)), title, font=_font(max(16, int(width * 0.024))), fill=(246, 245, 236, 235))
     image.save(path, format="JPEG", quality=88)
+
+
+def _camera_filter(width: int, height: int, duration: float, number: int) -> str:
+    frames = max(FPS, int(math.ceil(duration * FPS)))
+    progress = f"on/{frames}"
+    mode = (number - 1) % 4
+    if mode == 0:
+        zoom = f"1+0.10*{progress}"
+        x = f"(iw-iw/zoom)*(0.12+0.76*{progress})"
+        y = "(ih-ih/zoom)*0.42"
+    elif mode == 1:
+        zoom = f"1.10-0.10*{progress}"
+        x = f"(iw-iw/zoom)*(0.86-0.72*{progress})"
+        y = "(ih-ih/zoom)*0.58"
+    elif mode == 2:
+        zoom = f"1.035+0.025*{progress}"
+        x = f"(iw-iw/zoom)*(0.50+0.34*sin(2*PI*{progress}))"
+        y = f"(ih-ih/zoom)*(0.50-0.30*{progress})"
+    else:
+        zoom = f"1.08-0.06*{progress}"
+        x = f"(iw-iw/zoom)*(0.12+0.66*{progress})"
+        y = f"(ih-ih/zoom)*(0.18+0.64*{progress})"
+    return (
+        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},fps={FPS},"
+        f"zoompan=z='{zoom}':x='{x}':y='{y}':d=1:s={width}x{height}:fps={FPS},"
+        f"setsar=1,format=yuv420p"
+    )
 
 
 def prepare_scene_video(source: Path | None, keyword: str, destination: Path, ratio: str, duration: float, number: int, work_dir: Path) -> None:
     width, height = (1280, 720) if ratio == "16:9" else (720, 1280)
     destination.parent.mkdir(parents=True, exist_ok=True)
     clip_duration = max(1.0, duration)
-    vf = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,fps=24,format=yuv420p"
     if source is None:
-        image_path = work_dir / f"visual_{number:02d}.jpg"
-        _make_artwork(image_path, width, height, number, keyword)
-        command = [FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-loop", "1", "-framerate", "24", "-i", str(image_path), "-t", f"{clip_duration:.3f}", "-vf", vf, "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "27", "-movflags", "+faststart", str(destination)]
+        source = work_dir / f"visual_{number:02d}.jpg"
+        _make_artwork(source, width, height, number, keyword)
+    filter_graph = _camera_filter(width, height, clip_duration, number)
+    is_video = source.suffix.lower() in {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
+    if is_video:
+        input_args = ["-stream_loop", "-1", "-i", str(source)]
+        quality = "25"
     else:
-        command = [FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-stream_loop", "-1", "-i", str(source), "-t", f"{clip_duration:.3f}", "-vf", vf, "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "25", "-movflags", "+faststart", str(destination)]
-    _run(command)
+        input_args = ["-loop", "1", "-framerate", str(FPS), "-i", str(source)]
+        quality = "27"
+    _run([
+        FFMPEG, "-hide_banner", "-loglevel", "error", "-y", *input_args,
+        "-t", f"{clip_duration:.3f}", "-vf", filter_graph, "-an", "-c:v", "libx264",
+        "-preset", "ultrafast", "-crf", quality, "-r", str(FPS), "-movflags", "+faststart", str(destination),
+    ])
 
 
 def create_ambient_music(destination: Path, duration: float) -> None:
@@ -189,13 +228,12 @@ def render_video(scene_videos: list[Path], audio_paths: list[Path], music_path: 
     music_clip = None
     final_video = None
     mixed_audio = None
+    silent_path = destination.with_name(destination.stem + "_silent-captions.mp4")
     try:
-        offsets = []
         cursor = 0.0
         for video_path, audio_path in zip(scene_videos, audio_paths):
             video = VideoFileClip(str(video_path), audio=False)
             voice = AudioFileClip(str(audio_path))
-            offsets.append(cursor)
             clips.append(video)
             voice_clips.append(voice.with_start(cursor))
             cursor += video.duration
@@ -204,9 +242,8 @@ def render_video(scene_videos: list[Path], audio_paths: list[Path], music_path: 
             music_clip = AudioFileClip(str(music_path)).with_duration(cursor).with_volume_scaled(0.10)
         mixed_audio = CompositeAudioClip(voice_clips + ([music_clip] if music_clip else [])).with_duration(cursor)
         final_video = final_video.with_audio(mixed_audio)
-        silent_path = destination.with_name(destination.stem + "_silent-captions.mp4")
         final_video.write_videofile(
-            str(silent_path), fps=24, codec="libx264", audio_codec="aac", preset="ultrafast", threads=2,
+            str(silent_path), fps=FPS, codec="libx264", audio_codec="aac", preset="ultrafast", threads=2,
             bitrate="2400k", logger=None,
         )
         escaped_ass = str(ass_path.resolve()).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
@@ -215,7 +252,6 @@ def render_video(scene_videos: list[Path], audio_paths: list[Path], music_path: 
             "-vf", f"subtitles=filename='{escaped_ass}'", "-c:v", "libx264", "-preset", "veryfast", "-crf", "24",
             "-c:a", "copy", "-movflags", "+faststart", str(destination),
         ])
-        silent_path.unlink(missing_ok=True)
     finally:
         if final_video is not None:
             final_video.close()
@@ -227,3 +263,4 @@ def render_video(scene_videos: list[Path], audio_paths: list[Path], music_path: 
             clip.close()
         if music_clip is not None:
             music_clip.close()
+        silent_path.unlink(missing_ok=True)

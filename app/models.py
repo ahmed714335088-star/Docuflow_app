@@ -7,6 +7,7 @@ class ApiKeys(BaseModel):
     groq: str = ""
     gemini: str = ""
     pixabay: str = ""
+    pollinations: str = ""
 
 
 class GenerateRequest(BaseModel):
@@ -14,7 +15,8 @@ class GenerateRequest(BaseModel):
     aspect_ratio: Literal["16:9", "9:16"] = "16:9"
     video_language: Literal["en", "ar"] = "en"
     voice: str = "en-US-ChristopherNeural"
-    provider: Literal["demo", "groq", "gemini"] = "demo"
+    provider: Literal["demo", "groq", "gemini", "pollinations"] = "demo"
+    allow_pollinations: bool = False
     keys: ApiKeys = Field(default_factory=ApiKeys)
     whisper_model: Literal["tiny", "base", "small"] = "tiny"
     background_music: bool = True
