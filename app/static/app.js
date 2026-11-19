@@ -4,7 +4,7 @@
   const stageOrder = ["script", "voice", "visuals", "subtitles", "render"];
   let aspectRatio = "16:9";
   let toastTimer;
-  const keyIds = ["groq-key", "gemini-key", "pexels-key"];
+  const keyIds = ["groq-key", "gemini-key", "pixabay-key"];
 
   function toast(message, error = false) {
     const box = $("#toast");
@@ -16,15 +16,19 @@
   }
 
   function keysFromInputs() {
-    return { groq: $("#groq-key").value.trim(), gemini: $("#gemini-key").value.trim(), pexels: $("#pexels-key").value.trim() };
+    return { groq: $("#groq-key").value.trim(), gemini: $("#gemini-key").value.trim(), pixabay: $("#pixabay-key").value.trim() };
   }
 
   function loadSettings() {
     try {
       const values = JSON.parse(localStorage.getItem("docuflow.keys.v1") || "{}");
+      if (Object.hasOwn(values, "pexels")) {
+        delete values.pexels;
+        localStorage.setItem("docuflow.keys.v1", JSON.stringify(values));
+      }
       $("#groq-key").value = values.groq || "";
       $("#gemini-key").value = values.gemini || "";
-      $("#pexels-key").value = values.pexels || "";
+      $("#pixabay-key").value = values.pixabay || "";
       if (values.provider) {
         const radio = $(`input[name="provider"][value="${values.provider}"]`);
         if (radio) radio.checked = true;
@@ -48,8 +52,8 @@
     const provider = selectedProvider();
     const note = $("#provider-hint");
     if (provider === "demo") note.lastElementChild.textContent = "الوضع التجريبي لا يحتاج مفتاحاً؛ يستخدم سيناريو جاهزاً لإنشاء الصوت والترجمة ومعاينة الواجهة.";
-    if (provider === "groq") note.lastElementChild.textContent = keysFromInputs().groq ? "سيُنشأ النص والترجمة عبر Groq. أضف مفتاح Pexels اختيارياً لجلب لقطات حقيقية." : "أضف مفتاح Groq من صفحة الإعدادات قبل البدء. Pexels اختياري ويمكن استخدام خلفيات محلية.";
-    if (provider === "gemini") note.lastElementChild.textContent = keysFromInputs().gemini ? "سيُنشأ النص والترجمة عبر Gemini. أضف مفتاح Pexels اختيارياً لجلب لقطات حقيقية." : "أضف مفتاح Gemini من صفحة الإعدادات قبل البدء. Pexels اختياري ويمكن استخدام خلفيات محلية.";
+    if (provider === "groq") note.lastElementChild.textContent = keysFromInputs().groq ? "سيُنشأ النص والترجمة عبر Groq. أضف مفتاح Pixabay اختيارياً لجلب لقطات حقيقية." : "أضف مفتاح Groq من صفحة الإعدادات قبل البدء. Pixabay اختياري ويمكن استخدام خلفيات محلية.";
+    if (provider === "gemini") note.lastElementChild.textContent = keysFromInputs().gemini ? "سيُنشأ النص والترجمة عبر Gemini. أضف مفتاح Pixabay اختيارياً لجلب لقطات حقيقية." : "أضف مفتاح Gemini من صفحة الإعدادات قبل البدء. Pixabay اختياري ويمكن استخدام خلفيات محلية.";
   }
 
   function navigate(name) {

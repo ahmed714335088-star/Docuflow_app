@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 class ApiKeys(BaseModel):
     groq: str = ""
     gemini: str = ""
-    pexels: str = ""
+    pixabay: str = ""
 
 
 class GenerateRequest(BaseModel):

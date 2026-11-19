@@ -8,13 +8,13 @@ from typing import Any, Awaitable, Callable
 
 from app.media import audio_duration, create_ambient_music, make_voiceover, prepare_scene_video, render_video, transcribe_bounds, write_arabic_ass
 from app.models import GenerateRequest
-from app.providers import generate_script, fetch_pexels_video
+from app.providers import generate_script, fetch_pixabay_video
 
 Progress = Callable[..., Awaitable[None]]
 STAGES = [
     ("script", "إنشاء النص"),
     ("voice", "إنشاء التعليق الصوتي"),
-    ("visuals", "جلب مقاطع Pexels"),
+    ("visuals", "جلب مقاطع Pixabay"),
     ("subtitles", "مزامنة الترجمات العربية"),
     ("render", "تصيير الفيديو النهائي"),
 ]
@@ -57,13 +57,13 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
         sources: list[Path | None] = []
         for number, scene in enumerate(scenes, start=1):
             source: Path | None = None
-            if keys.pexels.strip():
-                downloaded = work / f"pexels_{number:02d}.mp4"
-                has_clip = await fetch_pexels_video(scene["visual_keywords"], keys.pexels, orientation, downloaded)
+            if keys.pixabay.strip():
+                downloaded = work / f"pixabay_{number:02d}.mp4"
+                has_clip = await fetch_pixabay_video(scene["visual_keywords"], keys.pixabay, orientation, downloaded)
                 if has_clip:
                     source = downloaded
             sources.append(source)
-        visual_note = "مقاطع Pexels" if keys.pexels.strip() and all(sources) else "مقاطع Pexels مع خلفيات محلية للمشاهد التي لم تتوفر لها لقطات" if any(sources) else "خلفيات تجريبية محلية (أضف مفتاح Pexels لجلب لقطات مخزون)"
+        visual_note = "مقاطع Pixabay" if keys.pixabay.strip() and all(sources) else "مقاطع Pixabay مع خلفيات محلية للمشاهد التي لم تتوفر لها لقطات" if any(sources) else "خلفيات تجريبية محلية (أضف مفتاح Pixabay لجلب لقطات مخزون)"
         scene_videos: list[Path] = []
         durations: list[float] = []
         for number, (scene, source, audio_path) in enumerate(zip(scenes, sources, audio_paths), start=1):

@@ -134,50 +134,82 @@ async def generate_script(topic: str, provider: str, keys: ApiKeys) -> dict[str,
     raise ValueError("مزود النص غير معروف.")
 
 
-async def fetch_pexels_video(query: str, key: str, orientation: str, destination: Path) -> bool:
-    """Download one suitable Pexels video; return False on an empty search."""
+async def fetch_pixabay_video(query: str, key: str, orientation: str, destination: Path) -> bool:
+    """Download one suitable Pixabay video; return False when search has no match."""
     if not key.strip():
         return False
-    params = {"query": query[:180], "per_page": 5, "orientation": orientation, "size": "large"}
+    portrait = orientation == "portrait"
+    params = {
+        "key": key.strip(),
+        "q": " ".join(query.split())[:100] or "nature",
+        "per_page": 20,
+        "video_type": "film",
+        "safesearch": "true",
+        "order": "popular",
+        "min_width": 720 if portrait else 1280,
+        "min_height": 1280 if portrait else 720,
+    }
     timeout = httpx.Timeout(60.0, connect=15.0)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         try:
-            response = await client.get(
-                "https://api.pexels.com/videos/search",
-                params=params,
-                headers={"Authorization": key.strip()},
-            )
+            response = await client.get("https://pixabay.com/api/videos/", params=params)
         except httpx.HTTPError as exc:
-            raise RuntimeError("تعذر الاتصال بـPexels؛ تحقق من المفتاح والإنترنت.") from exc
-        if response.status_code == 401:
-            raise RuntimeError("رفض Pexels المفتاح. راجع مفتاح API في الإعدادات.")
+            raise RuntimeError("تعذر الاتصال بـPixabay؛ تحقق من المفتاح والإنترنت.") from exc
+        if response.status_code in (401, 403):
+            raise RuntimeError("رفض Pixabay المفتاح. راجع مفتاح API في الإعدادات.")
         if response.status_code >= 400:
-            raise RuntimeError(f"رفض Pexels البحث (HTTP {response.status_code}).")
-        videos = response.json().get("videos", [])
-        if not videos:
+            raise RuntimeError(f"رفض Pixabay البحث (HTTP {response.status_code}).")
+        try:
+            hits = response.json().get("hits", [])
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise RuntimeError("تعذر قراءة استجابة Pixabay.") from exc
+        if not isinstance(hits, list) or not hits:
             return False
-        files = []
-        for video in videos:
-            for item in video.get("video_files", []):
-                link = item.get("link", "")
-                if link.startswith("https://") and item.get("file_type") == "video/mp4":
-                    files.append(item)
-        if not files:
+        selected_url = ""
+        max_size = 90 * 1024 * 1024
+        for hit in hits:
+            variants = hit.get("videos", {}) if isinstance(hit, dict) else {}
+            candidates = []
+            for quality in ("large", "medium", "small", "tiny"):
+                item = variants.get(quality, {}) if isinstance(variants, dict) else {}
+                url = str(item.get("url", "")) if isinstance(item, dict) else ""
+                width = int(item.get("width", 0) or 0) if isinstance(item, dict) else 0
+                height = int(item.get("height", 0) or 0) if isinstance(item, dict) else 0
+                size = int(item.get("size", 0) or 0) if isinstance(item, dict) else 0
+                if not url.startswith("https://") or width <= 0 or height <= 0:
+                    continue
+                if size > max_size:
+                    continue
+                if quality == "large" and size == 0:
+                    continue
+                if portrait and (height <= width or height < 720):
+                    continue
+                if not portrait and (width < height or width < 1280 or height < 720):
+                    continue
+                candidates.append((width * height, url))
+            if candidates:
+                selected_url = max(candidates, key=lambda candidate: candidate[0])[1]
+                break
+        if not selected_url:
             return False
-        files.sort(key=lambda item: (item.get("quality") == "hd", item.get("width", 0) * item.get("height", 0)), reverse=True)
-        url = files[0]["link"]
         destination.parent.mkdir(parents=True, exist_ok=True)
         total = 0
         try:
-            async with client.stream("GET", url) as download:
+            async with client.stream("GET", selected_url) as download:
                 download.raise_for_status()
                 with destination.open("wb") as output:
                     async for chunk in download.aiter_bytes(1024 * 256):
                         total += len(chunk)
-                        if total > 90 * 1024 * 1024:
-                            raise RuntimeError("تجاوز مقطع Pexels حد الحجم الآمن (90 MB).")
+                        if total > max_size:
+                            raise RuntimeError("تجاوز مقطع Pixabay حد الحجم الآمن (90 MB).")
                         output.write(chunk)
         except httpx.HTTPError as exc:
             destination.unlink(missing_ok=True)
-            raise RuntimeError("تعذر تنزيل المقطع المرئي من Pexels.") from exc
-        return destination.exists() and destination.stat().st_size > 50_000
+            raise RuntimeError("تعذر تنزيل المقطع المرئي من Pixabay.") from exc
+        except RuntimeError:
+            destination.unlink(missing_ok=True)
+            raise
+        if destination.exists() and destination.stat().st_size > 50_000:
+            return True
+        destination.unlink(missing_ok=True)
+        return False
