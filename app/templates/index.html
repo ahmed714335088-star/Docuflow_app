@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10171d">
+  <meta name="description" content="DocuFlow — استوديو عربي لإنتاج فيديوهات وثائقية بصوت وترجمة عربية.">
+  <title>DocuFlow — استوديو الأفلام الوثائقية</title>
+  <link rel="icon" type="image/svg+xml" href="/static/brand-logo.svg">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#studio" aria-label="DocuFlow الصفحة الرئيسية">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 42 42"><path d="M5 21h5l3-8 5 17 5-22 5 26 4-13 3 5h2"/><circle cx="21" cy="21" r="18"/></svg></span>
+        <span class="brand-word"><strong>DocuFlow</strong><small>استوديو الحكاية</small></span>
+      </a>
+      <div class="sidebar-rule"></div>
+      <p class="side-caption">مساحة العمل</p>
+      <nav class="side-nav" aria-label="التنقل">
+        <button class="nav-item active" data-view="studio"><span class="nav-icon">◈</span><span>استوديو الإنتاج</span><kbd>01</kbd></button>
+        <button class="nav-item" data-view="history"><span class="nav-icon">◷</span><span>أرشيف الفيديو</span><kbd id="history-count">00</kbd></button>
+        <button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span><span>الإعدادات والمفاتيح</span></button>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-note">
+        <span class="note-pip"></span>
+        <div><strong>خصوصية المفاتيح</strong><p>تبقى في هذا المتصفح ولا تُحفَظ على الخادم.</p></div>
+      </div>
+      <div class="side-footer"><span class="version-dot"></span> تشغيل محلي · أدوات مجانية</div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div class="crumb"><span>مساحة العمل</span><b>/</b><strong id="crumb-current">استوديو الإنتاج</strong></div>
+        <div class="top-actions"><span class="system-status"><i></i> جاهز للإنتاج</span><button class="icon-button" id="settings-shortcut" title="الإعدادات" aria-label="فتح الإعدادات">⚙</button><div class="avatar">DF</div></div>
+      </header>
+
+      <section class="view active" id="view-studio">
+        <div class="page-intro">
+          <div><div class="eyebrow"><span class="eyebrow-line"></span> استوديو وثائقي ذكي</div><h1>من الفكرة <em>إلى المشهد.</em></h1><p>اكتب موضوعاً، وسننسّق النص والصوت والصورة والترجمة في مسار إنتاج واحد.</p></div>
+          <div class="intro-side"><span class="intro-index">01</span><span class="intro-caption">حلقة الإنتاج<br>01 — 05</span></div>
+        </div>
+
+        <div class="workspace-layout">
+          <section class="editor-column" aria-label="إعداد الفيديو">
+            <div class="panel-heading"><div><span class="section-index">01 / الفكرة</span><h2>ما الحكاية التي سنرويها؟</h2></div><span class="duration-chip">فيلم قصير <i></i> 30–60 ثانية</span></div>
+            <label class="field-label" for="topics">الموضوع <span>موضوع واحد في كل سطر للأتمتة الدفعية</span></label>
+            <div class="textarea-wrap"><textarea id="topics" maxlength="3000" rows="5" placeholder="مثال: أسرار أعماق المحيط&#10;ماذا يحدث لو اختفت الشمس؟" spellcheck="false"></textarea><div class="textarea-foot"><span>اكتب موضوعاً واضحاً أو عدة موضوعات</span><span id="topic-count">0 / 8</span></div></div>
+
+            <div class="settings-grid">
+              <div class="setting-block"><label class="field-label">أبعاد الفيديو</label><div class="ratio-options" role="group" aria-label="نسبة العرض"><button type="button" class="ratio-option selected" data-ratio="16:9"><span class="ratio-icon landscape"></span><span><strong>يوتيوب</strong><small>أفقي · 16:9</small></span><span class="radio-dot"></span></button><button type="button" class="ratio-option" data-ratio="9:16"><span class="ratio-icon portrait"></span><span><strong>Shorts</strong><small>عمودي · 9:16</small></span><span class="radio-dot"></span></button></div></div>
+              <div class="setting-block"><label class="field-label" for="voice">صوت الراوي <span>إنجليزي</span></label><div class="select-wrap"><select id="voice"><option value="en-US-ChristopherNeural">Christopher · عميق وهادئ</option><option value="en-US-GuyNeural">Guy · وثائقي رصين</option><option value="en-US-AndrewNeural">Andrew · دافئ وواضح</option><option value="en-US-BrianNeural">Brian · منخفض ومتزن</option><option value="en-US-EricNeural">Eric · سرد سينمائي</option></select><span class="select-arrow">⌄</span></div><p class="field-hint">قد تختلف الأصوات المتاحة حسب خدمة edge-tts.</p></div>
+            </div>
+
+            <div class="provider-row"><div><span class="field-label">محرك كتابة النص</span><p>اختر خدمة ذكاء اصطناعي، أو ابدأ بالوضع التجريبي.</p></div><div class="provider-select"><label><input type="radio" name="provider" value="demo" checked><span>تجريبي</span></label><label><input type="radio" name="provider" value="groq"><span>Groq</span></label><label><input type="radio" name="provider" value="gemini"><span>Gemini</span></label></div></div>
+            <div class="inline-warning" id="provider-hint"><span>i</span><span>الوضع التجريبي لا يحتاج مفتاحاً؛ يستخدم سيناريو جاهزاً لإنشاء الصوت والترجمة ومعاينة الواجهة.</span></div>
+            <div class="editor-actions"><button class="primary-button" id="generate-button"><span class="button-orbit">✳</span><span>ابدأ إنتاج الفيديو</span><span class="button-arrow">←</span></button><span class="action-note">حتى 8 موضوعات في الدفعة الواحدة</span></div>
+          </section>
+
+          <aside class="right-column">
+            <section class="progress-card">
+              <div class="card-head"><div><span class="section-index">02 / خط الإنتاج</span><h3>تقدّم العمل</h3></div><span id="progress-percent" class="percent">—</span></div>
+              <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+              <p id="progress-message" class="progress-message">جاهز. أضف موضوعاً لبدء رحلتك.</p>
+              <div class="stage-list" id="stage-list">
+                <div class="stage-row" data-stage="script"><span class="stage-icon">01</span><span class="stage-name">إنشاء النص</span><span class="stage-status">بانتظار</span></div>
+                <div class="stage-row" data-stage="voice"><span class="stage-icon">02</span><span class="stage-name">التعليق الصوتي</span><span class="stage-status">بانتظار</span></div>
+                <div class="stage-row" data-stage="visuals"><span class="stage-icon">03</span><span class="stage-name">لقطات Pexels</span><span class="stage-status">بانتظار</span></div>
+                <div class="stage-row" data-stage="subtitles"><span class="stage-icon">04</span><span class="stage-name">مزامنة العربية</span><span class="stage-status">بانتظار</span></div>
+                <div class="stage-row" data-stage="render"><span class="stage-icon">05</span><span class="stage-name">تصيير الفيديو</span><span class="stage-status">بانتظار</span></div>
+              </div>
+              <div class="live-log" id="live-log" aria-live="polite"></div>
+            </section>
+            <div class="pipeline-note"><span class="pipeline-note-icon">⌁</span><div><strong>صوت وصورة متزامنان</strong><p>faster-whisper يحدد التوقيت، وASS يعرض العربية من اليمين إلى اليسار.</p></div></div>
+          </aside>
+        </div>
+
+        <section class="result-section" id="result-section" hidden>
+          <div class="result-heading"><div><span class="section-index">03 / المراجعة</span><h2>المشهد النهائي</h2></div><span id="result-source" class="result-source">جاهز للمشاهدة</span></div>
+          <div class="result-layout"><div class="video-frame"><video id="result-video" controls playsinline preload="metadata"></video><div class="video-corner">DOCUFLOW <span>PREVIEW</span></div></div><div class="result-info"><span class="result-kicker">اكتمل الإنتاج</span><h3 id="result-title">عنوان الفيديو</h3><p id="result-meta">—</p><a id="download-button" class="download-button" href="#" download><span>↓</span> تنزيل الفيديو <small>MP4</small></a><button id="show-history" class="text-button">افتح أرشيف الفيديو <span>←</span></button></div></div>
+        </section>
+      </section>
+
+      <section class="view" id="view-history">
+        <div class="page-intro compact-intro"><div><div class="eyebrow"><span class="eyebrow-line"></span> أرشيف محلي</div><h1>قصص <em>أُنجزت.</em></h1><p>الفيديوهات التي أُنتجت على هذه النسخة من اللوحة.</p></div><div class="archive-count"><strong id="archive-total">0</strong><span>فيديو</span></div></div>
+        <div id="history-grid" class="history-grid"></div><div id="history-empty" class="empty-state"><div class="empty-mark">◷</div><h2>الأرشيف فارغ حالياً</h2><p>بعد إنتاج أول فيديو، ستجده هنا لمشاهدته أو تنزيله.</p><button class="text-button" data-open-studio>العودة إلى الاستوديو <span>←</span></button></div>
+      </section>
+
+      <section class="view" id="view-settings">
+        <div class="page-intro compact-intro"><div><div class="eyebrow"><span class="eyebrow-line"></span> إعدادات محلية</div><h1>مفاتيح <em>الاتصال.</em></h1><p>أضف مفاتيح الخدمات المجانية لكتابة نصوصك وجلب اللقطات.</p></div></div>
+        <div class="settings-page-card"><div class="settings-page-intro"><span class="setting-big-icon">⌘</span><div><h2>مفاتيح API</h2><p>لا تُرسَل المفاتيح إلا عند بدء التوليد، وتُحفظ في التخزين المحلي لهذا المتصفح فقط.</p></div></div>
+          <div class="api-field"><label for="groq-key">Groq API Key <span>اختياري — الكتابة والترجمة</span></label><div class="key-input"><input type="password" id="groq-key" placeholder="gsk_…" autocomplete="off"><button type="button" class="reveal-key" data-target="groq-key">إظهار</button></div><small>يُستخدم عند اختيار Groq. اتركه فارغاً للوضع التجريبي.</small></div>
+          <div class="api-field"><label for="gemini-key">Google Gemini API Key <span>اختياري — الكتابة والترجمة</span></label><div class="key-input"><input type="password" id="gemini-key" placeholder="AIza…" autocomplete="off"><button type="button" class="reveal-key" data-target="gemini-key">إظهار</button></div><small>يُستخدم عند اختيار Gemini. يخضع لحدود وحصة المزود.</small></div>
+          <div class="api-field"><label for="pexels-key">Pexels API Key <span>اختياري — لقطات مخزون</span></label><div class="key-input"><input type="password" id="pexels-key" placeholder="ألصق مفتاح Pexels" autocomplete="off"><button type="button" class="reveal-key" data-target="pexels-key">إظهار</button></div><small>بدونه يستخدم العرض التجريبي خلفيات محلية؛ لا تُرسل أي مفاتيح في سجلات الخادم.</small></div>
+          <div class="settings-security"><strong>تنبيه أمان</strong><p>التخزين المحلي مخصص لجهازك الشخصي. لا تحفظ مفاتيحاً في متصفح مشترك أو أثناء استخدام معاينة عامة، واحذفها بعد الانتهاء من جهاز مشترك.</p></div>
+          <div class="settings-actions"><button class="primary-button small-primary" id="save-settings"><span>حفظ الإعدادات في هذا المتصفح</span><span class="button-arrow">←</span></button><button class="clear-button" id="clear-settings">مسح المفاتيح</button><span id="settings-feedback" aria-live="polite"></span></div>
+        </div>
+      </section>
+
+      <footer class="main-footer"><span>DocuFlow <i>·</i> مساحة سرد مرئية</span><span>صُنع للقصص التي تستحق أن تُروى.</span></footer>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
