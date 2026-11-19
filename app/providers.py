@@ -24,18 +24,18 @@ class PollinationsError(RuntimeError):
 
 
 _DEMO_EN = [
-    ("One question about {topic} can reveal an unexpected story.", "قد يكشف سؤال واحد عن {topic} حكايةً غير متوقعة.", "cinematic question mystery documentary", "Photorealistic cinematic documentary, an intriguing unanswered question shown through a striking real-world visual, high-detail 8K-style texture, dramatic natural light, no text, wide composition."),
-    ("The first answer often seems perfectly obvious.", "تبدو الإجابة الأولى غالباً بديهية تماماً.", "obvious answer familiar everyday scene", "Photorealistic documentary close-up of a familiar everyday scene that seems ordinary at first glance, subtle cinematic tension, no text."),
-    ("Then a small detail changes everything.", "ثم تظهر تفصيلة صغيرة تقلب كل شيء.", "hidden detail macro discovery", "Extreme macro documentary shot revealing one unexpected detail, shallow depth of field, cinematic lighting, no text."),
-    ("Follow it, and the familiar picture begins to shift.", "نتتبعها، فتبدأ الصورة المألوفة بالتغيّر.", "clue trail shifting perspective", "Cinematic documentary camera tracking toward a revealing clue, perspective shifting from shadow into light, no text."),
-    ("Patterns appear where no one expected them.", "وتظهر أنماط لم يتوقعها أحد.", "patterns nature science aerial", "Photorealistic aerial documentary view of surprising patterns emerging across a vast landscape, high detail, no text."),
-    ("Each clue opens a deeper mystery.", "كل دليل يفتح باباً لغزٍ أعمق.", "deep mystery archive evidence", "Moody documentary shot of carefully preserved evidence and an unfolding mystery, realistic textures, no text."),
-    ("But one piece still refuses to fit.", "لكن قطعة واحدة ما زالت خارج الصورة.", "missing piece contradiction dramatic", "A cinematic documentary visual suggesting a missing piece and a contradiction, isolated object under a beam of light, no text."),
-    ("Researchers test the evidence against the story.", "يفحص الباحثون الأدلة ويقارنونها بالرواية.", "researcher laboratory evidence testing", "Researchers examining real evidence in a modern laboratory, documentary handheld camera feel, natural skin and materials, no text."),
-    ("A new discovery turns the timeline around.", "ثم يقلب اكتشاف جديد ترتيب الأحداث.", "new discovery history timeline", "Cinematic reconstruction of a newly uncovered historical artifact changing a timeline, photorealistic, no text."),
-    ("What looked simple now connects distant worlds.", "ما بدا بسيطاً بات يربط عوالم بعيدة.", "connected distant worlds earth night", "Epic documentary shot connecting distant places across Earth at night, lights and atmosphere, wide cinematic frame, no text."),
-    ("The truth was hiding in overlooked details.", "كانت الحقيقة مختبئة في تفاصيل تم تجاهلها.", "overlooked detail reveal close up", "Slow cinematic documentary reveal of overlooked details in an object or landscape, subtle suspense, no text."),
-    ("And the next question is even more surprising.", "أما السؤال التالي، فربما يكون أكثر إدهاشاً.", "surprising question horizon documentary", "Hopeful yet suspenseful wide documentary ending at a dramatic horizon, opening a new question, photorealistic, no text."),
+    ("One question begins this story.", "قد يفتح سؤال واحد باب الحكاية.", "cinematic question mystery documentary", "Photorealistic cinematic documentary, an intriguing unanswered question shown through a striking real-world visual, high-detail 8K-style texture, dramatic natural light, no text, wide composition."),
+    ("The first answer seems obvious.", "تبدو الإجابة الأولى غالباً بديهية تماماً.", "obvious answer familiar everyday scene", "Photorealistic documentary close-up of a familiar everyday scene that seems ordinary at first glance, subtle cinematic tension, no text."),
+    ("Then one detail changes everything.", "ثم تظهر تفصيلة صغيرة تقلب كل شيء.", "hidden detail macro discovery", "Extreme macro documentary shot revealing one unexpected detail, shallow depth of field, cinematic lighting, no text."),
+    ("Follow the clue; the picture shifts.", "نتتبعها، فتبدأ الصورة المألوفة بالتغيّر.", "clue trail shifting perspective", "Cinematic documentary camera tracking toward a revealing clue, perspective shifting from shadow into light, no text."),
+    ("Unexpected patterns begin to appear.", "وتظهر أنماط لم يتوقعها أحد.", "patterns nature science aerial", "Photorealistic aerial documentary view of surprising patterns emerging across a vast landscape, high detail, no text."),
+    ("Each clue opens another mystery.", "كل دليل يفتح باباً لغزٍ أعمق.", "deep mystery archive evidence", "Moody documentary shot of carefully preserved evidence and an unfolding mystery, realistic textures, no text."),
+    ("One piece still refuses to fit.", "لكن قطعة واحدة ما زالت خارج الصورة.", "missing piece contradiction dramatic", "A cinematic documentary visual suggesting a missing piece and a contradiction, isolated object under a beam of light, no text."),
+    ("Researchers test the account against evidence.", "يفحص الباحثون الأدلة ويقارنونها بالرواية.", "researcher laboratory evidence testing", "Researchers examining real evidence in a modern laboratory, documentary handheld camera feel, natural skin and materials, no text."),
+    ("A discovery rewrites the timeline.", "ثم يقلب اكتشاف جديد ترتيب الأحداث.", "new discovery history timeline", "Cinematic reconstruction of a newly uncovered historical artifact changing a timeline, photorealistic, no text."),
+    ("Simple clues connect distant worlds.", "ما بدا بسيطاً بات يربط عوالم بعيدة.", "connected distant worlds earth night", "Epic documentary shot connecting distant places across Earth at night, lights and atmosphere, wide cinematic frame, no text."),
+    ("Truth hides in overlooked details.", "كانت الحقيقة مختبئة في تفاصيل تم تجاهلها.", "overlooked detail reveal close up", "Slow cinematic documentary reveal of overlooked details in an object or landscape, subtle suspense, no text."),
+    ("But the next question changes everything.", "أما السؤال التالي، فربما يكون أكثر إدهاشاً.", "surprising question horizon documentary", "Hopeful yet suspenseful wide documentary ending at a dramatic horizon, opening a new question, photorealistic, no text."),
 ]
 
 _DEMO_AR = [
@@ -71,10 +71,20 @@ def _fallback_image_prompt(keywords: str, ratio: str = "16:9") -> str:
     )
 
 
-def demo_script(topic: str, video_language: str = "en") -> dict[str, Any]:
+def demo_script(topic: str, video_language: str = "en", scene_count: int = 15) -> dict[str, Any]:
+    if scene_count > 16:
+        raise ValueError("وضع التجربة يدعم دقيقة واحدة فقط؛ اختر مزود نص لمدد الفيديو الأطول.")
     scenes: list[dict[str, str]] = []
     if video_language == "ar":
-        for index, (narration_template, keywords, image_prompt) in enumerate(_DEMO_AR, start=1):
+        rows = list(_DEMO_AR[:scene_count])
+        extras = [
+            ("ثم نختبر هذه الرواية على ضوء الأدلة.", "documentary evidence comparison archive records", "Documentary close-up of records compared side by side under a desk lamp, no readable text."),
+            ("وتكشف المقارنة ما غاب عن النظرة الأولى.", "researcher comparing historical evidence timeline", "Researcher comparing historical evidence on a timeline, cinematic documentary detail, no legible labels."),
+            ("لكن السؤال الأهم يبقى مفتوحاً.", "open question horizon documentary ending", "Reflective cinematic documentary ending with a real-world horizon and an unresolved question, no text."),
+            ("ولا بد من اختبار الدليل الأخير.", "final evidence test documentary archive", "Final documentary close-up of evidence being checked against an archival timeline, cinematic light, no readable labels."),
+        ]
+        rows.extend(extras[: max(0, scene_count - len(rows))])
+        for narration_template, keywords, image_prompt in rows:
             narration = narration_template.replace("{topic}", f"{topic}")
             scenes.append({
                 "narration": narration,
@@ -87,10 +97,18 @@ def demo_script(topic: str, video_language: str = "en") -> dict[str, Any]:
             "hook": f"وراء «{topic}» سؤال صغير يقود إلى حكاية أكبر.",
             "scenes": scenes,
             "demo": True,
-            "model": "demo-12-scenes",
+            "model": f"demo-{scene_count}-scenes",
         }
 
-    for narration_template, translation_template, keywords, image_prompt in _DEMO_EN:
+    rows_en = list(_DEMO_EN[:scene_count])
+    extras_en = [
+        ("Now we test the account.", "ثم نختبر هذه الرواية على ضوء الأدلة.", "documentary evidence comparison archive records", "Documentary close-up of records compared side by side under a desk lamp, no readable text."),
+        ("Evidence reveals what we missed.", "وتكشف المقارنة ما غاب عن النظرة الأولى.", "researcher comparing historical evidence timeline", "Researcher comparing historical evidence on a timeline, cinematic documentary detail, no legible labels."),
+        ("The key question remains open.", "لكن السؤال الأهم يبقى مفتوحاً.", "open question horizon documentary ending", "Reflective cinematic documentary ending with a real-world horizon and an unresolved question, no text."),
+        ("The final clue needs testing.", "ولا بد من اختبار الدليل الأخير.", "final evidence test documentary archive", "Final documentary close-up of evidence being checked against an archival timeline, cinematic light, no readable labels."),
+    ]
+    rows_en.extend(extras_en[: max(0, scene_count - len(rows_en))])
+    for narration_template, translation_template, keywords, image_prompt in rows_en:
         scenes.append({
             "narration": narration_template.replace("{topic}", topic),
             "translation_ar": translation_template.replace("{topic}", topic),
@@ -102,11 +120,11 @@ def demo_script(topic: str, video_language: str = "en") -> dict[str, Any]:
         "hook": f"One question about {topic} can reveal an unexpected story.",
         "scenes": scenes,
         "demo": True,
-        "model": "demo-12-scenes",
+        "model": f"demo-{scene_count}-scenes",
     }
 
 
-def _parse_json(text: str, video_language: str = "en", ratio: str = "16:9") -> dict[str, Any]:
+def _parse_json(text: str, video_language: str = "en", ratio: str = "16:9", scene_count: int = 12) -> dict[str, Any]:
     text = text.strip()
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
     first, last = text.find("{"), text.rfind("}")
@@ -117,7 +135,7 @@ def _parse_json(text: str, video_language: str = "en", ratio: str = "16:9") -> d
     if not isinstance(raw_scenes, list) or not raw_scenes:
         raise ValueError("استجابة خدمة النص لا تحتوي مشاهد.")
     normalized: list[dict[str, str]] = []
-    for scene in raw_scenes[:18]:
+    for scene in raw_scenes[:scene_count]:
         if not isinstance(scene, dict):
             continue
         narration = str(scene.get("narration") or scene.get("narration_en") or "").strip()
@@ -135,8 +153,8 @@ def _parse_json(text: str, video_language: str = "en", ratio: str = "16:9") -> d
             })
     if not normalized:
         raise ValueError("تعذر العثور على مشاهد صالحة في استجابة الخدمة.")
-    if len(normalized) < 8:
-        raise ValueError("أعاد مزود النص أقل من 8 مشاهد قصيرة. أعد المحاولة أو استخدم الوضع التجريبي.")
+    if len(normalized) != scene_count:
+        raise ValueError(f"أعاد مزود النص {len(normalized)} مشهداً، بينما تتطلب المدة {scene_count} مشهداً. أعد المحاولة.")
     default_title = "فيلم وثائقي قصير" if video_language == "ar" else "Documentary short"
     return {
         "title": str(payload.get("title") or default_title).strip()[:160],
@@ -146,17 +164,18 @@ def _parse_json(text: str, video_language: str = "en", ratio: str = "16:9") -> d
     }
 
 
-def _prompt(topic: str, video_language: str = "en", ratio: str = "16:9") -> str:
+def _prompt(topic: str, video_language: str = "en", ratio: str = "16:9", scene_count: int = 15) -> str:
     frame = "9:16 vertical" if ratio == "9:16" else "16:9 horizontal"
+    target_seconds = round(scene_count * 3.78 + 0.22)
     if video_language == "ar":
-        return f"""اكتب نصاً وثائقياً سريع الإيقاع ومشوّقاً عن: {topic!r}، بلغة عربية فصحى سهلة، لفيديو {frame}.
-ابدأ بخطاف يثير سؤالاً، ثم صعّد الفضول عبر معلومة/دليل/تحول، واختم بكشف مُرضٍ وسؤال يفتح باباً جديداً. لا تقلّد عبارات قناة بعينها، ولا تخترع حقائق.
-أعد 12 مشهداً مرقماً في مصفوفة JSON. كل narration جملة منطوقة عربية قصيرة بين 6 و12 كلمة تقريباً، لتستغرق قرابة 3–5 ثوانٍ بصوت الراوي. اجعل كل مشهد لقطة بصرية جديدة ومختلفة عن سابقه. في كل مشهد اكتب translation_ar مطابقاً للسرد العربي (سيُعرض حرفياً كترجمة)، وvisual_keywords من 4–8 كلمات بحث قصيرة بالإنجليزية لـPixabay، وimage_prompt وصفي بالإنجليزية لصورة وثائقية واقعية بطابع سينمائي 8K-style من دون نص مكتوب. اجعل توزيع الأدوار متدرجاً: خطاف، سياق، أدلة، انعطاف، كشف، خاتمة.
-أعد JSON صالحاً فقط بالشكل: {{"title":"عنوان عربي قصير","hook":"خطاف عربي","scenes":[{{"narration":"جملة قصيرة","translation_ar":"نفس الجملة","visual_keywords":"English stock-footage keywords","image_prompt":"English photorealistic cinematic image prompt"}}]}}. لا تضف Markdown."""
-    return f"""Create a fast-paced, highly engaging and factual cinematic documentary short about: {topic!r}, for {frame}.
-Build a strong curiosity hook, escalating evidence, one surprising but well-supported turn, a satisfying reveal, and a final open question. Keep the pacing exciting without copying any named channel or inventing facts.
-Return exactly 12 numbered scene objects in a JSON array. Each spoken narration must be one short natural English sentence of about 6–12 words, designed to last roughly 3–5 seconds in voiceover. Every scene must introduce a distinct visual beat. For each scene, provide a faithful fluent Modern Standard Arabic translation, 4–8 short English Pixabay search keywords, and a separate descriptive English image_prompt for a photorealistic cinematic documentary still with 8K-style detail, no text or watermark. The story arc should move through hook, context, clues, reversal, reveal, and payoff.
-Return ONLY valid JSON in this exact shape: {{"title":"short English title","hook":"one strong question-driven hook","scenes":[{{"narration":"short 6-12 word sentence","translation_ar":"faithful Arabic translation of this scene","visual_keywords":"4-8 English stock-footage search keywords","image_prompt":"English photorealistic cinematic image prompt"}}]}}. No markdown."""
+        return f"""اكتب سيناريو وثائقياً سريعاً وجذاباً عن: {topic!r}، بالعربية الفصحى السليمة والطبيعية، لفيديو {frame} مدته قرابة {target_seconds} ثانية.
+ابدأ بخطاف قوي في أول مشهدين، ثم قدّم سياقاً وأدلة وتحولاً وكشفاً وخاتمة. اجعل كل جملة دقيقة نحوياً وموجزة وسهلة النطق، وتجنب الترجمة الحرفية. ميّز الوقائع الموثقة عن الفرضيات: استخدم صياغة مثل «تشير التقارير التاريخية إلى…» للوقائع المنقولة، و«تطرح بعض الفرضيات…» للنظريات؛ لا تخترع أرقاماً أو مصادر أو أحداثاً، ولا تعرض فرضية على أنها حقيقة.
+أعد بالضبط {scene_count} مشهداً. اجعل narration لكل مشهد 4–7 كلمات عربية منطوقة، مناسبة لـ3–4 ثوانٍ بسرعة طبيعية، وبفكرة واحدة. قسّم الحجة مشهداً مشهداً ولا تكرر المعلومة أو الصورة. في visual_keywords اكتب استعلاماً تصويرياً إنجليزياً محدداً، عادة 5–9 كلمات، يصف الشيء والفعل والبيئة في هذا المشهد (مثال: cargo ship storm Atlantic night؛ vintage airplane flying clouds archival؛ compass navigation map closeup؛ underwater methane bubbles seabed). ممنوع الكلمات العامة المفردة مثل fog أو ocean أو mystery. اجعل استعلام كل مشهد مختلفاً عن كل الاستعلامات السابقة. الصورة يجب أن تعرض ما يقوله narration فعلياً لا مجرد جو عام. أضف image_prompt إنجليزياً واقعياً مطابقاً للسرد.
+اجعل translation_ar مطابقة للسرد العربي حرفياً. أعد JSON فقط بالشكل: {{"title":"عنوان عربي موجز","hook":"خطاف عربي","scenes":[{{"narration":"جملة عربية قصيرة دقيقة","translation_ar":"نفس الجملة","visual_keywords":"specific English search query","image_prompt":"context-specific English documentary image prompt"}}]}}. لا تضف Markdown."""
+    return f"""Create a factual, fast-paced, highly engaging documentary script about: {topic!r}, for {frame}, about {target_seconds} seconds long.
+Open with a gripping two-scene hook, then build context, evidence, a turn, reveal and payoff. Do not fabricate statistics, sources, quotes, incidents or certainty; clearly distinguish documented facts from hypotheses. Keep every English sentence grammatically natural and fact-aware.
+Return exactly {scene_count} scenes. Each spoken narration must contain 4–7 short English words and fit a 3–4 second voiceover at natural pace. Every scene needs a distinct factual beat and a different visual. For each scene provide a faithful fluent Arabic translation and a specific 5–9 word ENGLISH Pixabay query naming the subject, action and setting in the narration (e.g. cargo ship storm Atlantic night; vintage airplane flying clouds archival; compass navigation map closeup; underwater methane bubbles seabed). Never use vague one-word queries like fog, ocean, mystery. No repeated query, clip idea, or generic B-roll unrelated to the sentence. Also provide a separate, concrete English image prompt showing the actual described action.
+Return ONLY valid JSON: {{"title":"short title","hook":"hook","scenes":[{{"narration":"4-7 spoken English words","translation_ar":"accurate Arabic translation","visual_keywords":"specific contextual English search query","image_prompt":"specific documentary visual for this narration"}}]}}. No markdown."""
 
 
 def _gemini_candidate_sort(model_id: str) -> tuple[int, tuple[int, ...], int, str]:
@@ -213,7 +232,7 @@ async def _discover_gemini_models(client: httpx.AsyncClient, api_key: str) -> li
 
 
 async def _generate_gemini(
-    client: httpx.AsyncClient, prompt: str, api_key: str, video_language: str, aspect_ratio: str
+    client: httpx.AsyncClient, prompt: str, api_key: str, video_language: str, aspect_ratio: str, scene_count: int
 ) -> dict[str, Any]:
     models = await _discover_gemini_models(client, api_key)
     if not models:
@@ -230,7 +249,7 @@ async def _generate_gemini(
                 params={"key": api_key},
                 json={
                     "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.75, "maxOutputTokens": 9000},
+                    "generationConfig": {"temperature": 0.75, "maxOutputTokens": min(24000, max(4000, scene_count * 150))},
                 },
             )
         except httpx.HTTPError as exc:
@@ -255,7 +274,7 @@ async def _generate_gemini(
             last_status = response.status_code
             continue
         try:
-            result = _parse_json(text, video_language, aspect_ratio)
+            result = _parse_json(text, video_language, aspect_ratio, scene_count)
         except (ValueError, json.JSONDecodeError) as exc:
             raise RuntimeError("أعاد Gemini نصاً لا يطابق بنية المشاهد القصيرة. أعد المحاولة أو استخدم وضعاً آخر.") from exc
         result["model"] = model
@@ -325,7 +344,7 @@ async def _pollinations_models(
 
 
 async def _generate_pollinations(
-    client: httpx.AsyncClient, prompt: str, api_key: str, video_language: str, aspect_ratio: str
+    client: httpx.AsyncClient, prompt: str, api_key: str, video_language: str, aspect_ratio: str, scene_count: int
 ) -> dict[str, Any]:
     if not api_key.strip():
         raise ValueError("أدخل مفتاح Pollinations؛ خدمة توليد النص الحالية تتطلب مفتاحاً ورصيد Pollen.")
@@ -345,9 +364,9 @@ async def _generate_pollinations(
         if "temperature" in supported:
             body["temperature"] = 0.75
         if "max_tokens" in supported:
-            body["max_tokens"] = 9000
+            body["max_tokens"] = min(24000, max(4000, scene_count * 150))
         elif "max_completion_tokens" in supported:
-            body["max_completion_tokens"] = 9000
+            body["max_completion_tokens"] = min(24000, max(4000, scene_count * 150))
         if "response_format" in supported:
             body["response_format"] = {"type": "json_object"}
         try:
@@ -372,7 +391,7 @@ async def _generate_pollinations(
             text = payload["choices"][0]["message"]["content"]
             if isinstance(text, list):
                 text = "".join(str(part.get("text", "")) for part in text if isinstance(part, dict))
-            result = _parse_json(str(text), video_language, aspect_ratio)
+            result = _parse_json(str(text), video_language, aspect_ratio, scene_count)
         except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise PollinationsError("لم تُرجع Pollinations سيناريو JSON صالحاً.") from exc
         result["model"] = model_id
@@ -391,11 +410,14 @@ async def generate_script(
     keys: ApiKeys,
     video_language: str = "en",
     aspect_ratio: str = "16:9",
+    scene_count: int = 15,
 ) -> dict[str, Any]:
     if provider == "demo":
-        return demo_script(topic, video_language)
-    prompt = _prompt(topic, video_language, aspect_ratio)
-    timeout = httpx.Timeout(100.0, connect=20.0)
+        if scene_count > 16:
+            raise ValueError("وضع التجربة مصمم لمقطع دقيقة واحدة فقط؛ اختر Gemini أو Groq أو Pollinations للمدد الأطول.")
+        return demo_script(topic, video_language, scene_count)
+    prompt = _prompt(topic, video_language, aspect_ratio, scene_count)
+    timeout = httpx.Timeout(300.0, connect=30.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         if provider == "groq":
             if not keys.groq.strip():
@@ -407,10 +429,10 @@ async def generate_script(
                     json={
                         "model": GROQ_MODEL,
                         "temperature": 0.75,
-                        "max_tokens": 9000,
+                        "max_tokens": min(24000, max(4000, scene_count * 150)),
                         "response_format": {"type": "json_object"},
                         "messages": [
-                            {"role": "system", "content": "Write accurate, engaging 12-scene documentary scripts in the requested language. Keep each narration micro-scene short and every visual keyword and image prompt in English."},
+                            {"role": "system", "content": f"Write accurate, engaging documentary scripts with exactly {scene_count} short scenes in the requested language. Keep narration per scene short, and every visual keyword and image prompt in English."},
                             {"role": "user", "content": prompt},
                         ],
                     },
@@ -423,29 +445,31 @@ async def generate_script(
                 text = response.json()["choices"][0]["message"]["content"]
             except (KeyError, IndexError, TypeError, ValueError) as exc:
                 raise RuntimeError("تعذر قراءة استجابة Groq.") from exc
-            result = _parse_json(text, video_language, aspect_ratio)
+            result = _parse_json(text, video_language, aspect_ratio, scene_count)
             result["model"] = GROQ_MODEL
             return result
 
         if provider == "gemini":
             if not keys.gemini.strip():
                 raise ValueError("أدخل مفتاح Gemini في الإعدادات أو اختر الوضع التجريبي.")
-            return await _generate_gemini(client, prompt, keys.gemini.strip(), video_language, aspect_ratio)
+            return await _generate_gemini(client, prompt, keys.gemini.strip(), video_language, aspect_ratio, scene_count)
 
         if provider == "pollinations":
-            return await _generate_pollinations(client, prompt, keys.pollinations, video_language, aspect_ratio)
+            return await _generate_pollinations(client, prompt, keys.pollinations, video_language, aspect_ratio, scene_count)
 
     raise ValueError("مزود النص غير معروف.")
 
 
-async def fetch_pixabay_video(query: str, key: str, orientation: str, destination: Path) -> bool:
-    """Download one suitable Pixabay video; return False when search has no match."""
+async def fetch_pixabay_video(
+    query: str, key: str, orientation: str, destination: Path, used_ids: set[str] | None = None
+) -> bool:
+    """Download one suitable Pixabay video not already used in this film."""
     if not key.strip():
         return False
     portrait = orientation == "portrait"
     params = {
         "key": key.strip(),
-        "q": " ".join(query.split())[:100] or "nature",
+        "q": re.sub(r"\s+", " ", _english_text(query, 100)).strip() or "documentary scene",
         "per_page": 20,
         "video_type": "film",
         "safesearch": "true",
@@ -471,9 +495,11 @@ async def fetch_pixabay_video(query: str, key: str, orientation: str, destinatio
             return False
 
         selected_url = ""
+        selected_id = ""
         max_size = 90 * 1024 * 1024
         for hit in hits:
             variants = hit.get("videos", {}) if isinstance(hit, dict) else {}
+            hit_id = str(hit.get("id", "")).strip() if isinstance(hit, dict) else ""
             candidates = []
             for quality in ("large", "medium", "small", "tiny"):
                 item = variants.get(quality, {}) if isinstance(variants, dict) else {}
@@ -491,11 +517,18 @@ async def fetch_pixabay_video(query: str, key: str, orientation: str, destinatio
                     continue
                 candidates.append((width * height, url))
             if candidates:
-                selected_url = max(candidates, key=lambda candidate: candidate[0])[1]
+                best_url = max(candidates, key=lambda candidate: candidate[0])[1]
+                identity = hit_id or best_url
+                if used_ids is not None and identity in used_ids:
+                    continue
+                selected_url, selected_id = best_url, identity
                 break
         if not selected_url:
             return False
 
+        # Reserve the ID before the next await so simultaneous scene searches cannot pick it too.
+        if used_ids is not None and selected_id:
+            used_ids.add(selected_id)
         destination.parent.mkdir(parents=True, exist_ok=True)
         total = 0
         try:
@@ -508,13 +541,19 @@ async def fetch_pixabay_video(query: str, key: str, orientation: str, destinatio
                             raise RuntimeError("تجاوز مقطع Pixabay حد الحجم الآمن (90 MB).")
                         output.write(chunk)
         except httpx.HTTPError as exc:
+            if used_ids is not None and selected_id:
+                used_ids.discard(selected_id)
             destination.unlink(missing_ok=True)
             raise RuntimeError("تعذر تنزيل المقطع المرئي من Pixabay.") from exc
         except RuntimeError:
+            if used_ids is not None and selected_id:
+                used_ids.discard(selected_id)
             destination.unlink(missing_ok=True)
             raise
         if destination.exists() and destination.stat().st_size > 50_000:
             return True
+        if used_ids is not None and selected_id:
+            used_ids.discard(selected_id)
         destination.unlink(missing_ok=True)
         return False
 

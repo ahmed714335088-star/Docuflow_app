@@ -13,6 +13,7 @@ class ApiKeys(BaseModel):
 class GenerateRequest(BaseModel):
     topics: str = Field(min_length=3, max_length=3000)
     aspect_ratio: Literal["16:9", "9:16"] = "16:9"
+    duration_minutes: Literal[1, 3, 5, 10] = 1
     video_language: Literal["en", "ar"] = "en"
     voice: str = "en-US-ChristopherNeural"
     provider: Literal["demo", "groq", "gemini", "pollinations"] = "demo"

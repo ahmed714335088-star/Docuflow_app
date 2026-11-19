@@ -6,7 +6,7 @@ DIST = ROOT / "dist"
 ARCHIVE = DIST / "DocuFlow.zip"
 INCLUDE = [
     "app", "public", "scripts/package_zip.py", "requirements.txt", "README.md",
-    ".env.example", ".gitignore", "Dockerfile", "start.sh", "start.bat",
+    ".env.example", ".gitignore", "Dockerfile", "start.sh", "start.bat", "pyrightconfig.json",
 ]
 EXCLUDE_PARTS = {"__pycache__", ".venv", ".git", "outputs", "work", "dist"}
 EXCLUDE_SUFFIXES = {".pyc", ".pyo", ".mp4", ".mp3", ".m4a", ".log", ".zip"}

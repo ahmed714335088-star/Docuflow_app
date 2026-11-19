@@ -47,6 +47,13 @@
       : "أصوات إنجليزية طبيعية؛ تتبدل القائمة تلقائياً مع لغة الفيديو.";
   }
 
+  function updateDurationLabel() {
+    const minutes = Number($("#duration-minutes").value || 1);
+    const scenes = Math.ceil((minutes * 60 - 0.22) / (4 - 0.22));
+    $("#scene-duration-chip").innerHTML = `${scenes} مشهداً <i></i> 4 ثوانٍ كحد أقصى`;
+    $("#duration-note").textContent = `${scenes} مشهداً · ${minutes} ${minutes === 1 ? "دقيقة" : "دقائق"} · حتى 8 موضوعات`;
+  }
+
   function loadSettings() {
     try {
       const values = JSON.parse(localStorage.getItem("docuflow.keys.v1") || "{}");
@@ -63,7 +70,9 @@
         if (radio) radio.checked = true;
       }
       $("#video-language").value = values.video_language === "ar" ? "ar" : "en";
+      $("#duration-minutes").value = [1, 3, 5, 10].includes(Number(values.duration_minutes)) ? String(values.duration_minutes) : "1";
       updateVoiceOptions(values.voice || "");
+      updateDurationLabel();
       updateProviderHint();
     } catch (_) { /* Ignore invalid browser-local preferences. */ }
   }
@@ -73,6 +82,7 @@
       ...keysFromInputs(),
       provider: selectedProvider(),
       video_language: $("#video-language").value,
+      duration_minutes: Number($("#duration-minutes").value),
       voice: $("#voice").value,
     };
     localStorage.setItem("docuflow.keys.v1", JSON.stringify(values));
@@ -87,11 +97,14 @@
     const provider = selectedProvider();
     const note = $("#provider-hint");
     const language = $("#video-language").value === "ar" ? "العربية" : "الإنجليزية";
+    const minutes = Number($("#duration-minutes").value || 1);
     const keys = keysFromInputs();
     const visuals = keys.pixabay
       ? "سيجرب Pixabay أولاً، ثم صورة Pollinations بعد موافقتك؛ وإلا يستخدم خلفية متحركة محلية."
       : "بدون Pixabay يستخدم خلفية محلية متحركة، أو صورة Pollinations بمفتاح وموافقة صريحة.";
-    if (provider === "demo") note.lastElementChild.textContent = `الوضع التجريبي بلا خدمات نص خارجية؛ ينشئ 12 مشهداً قصيرة باللغة ${language} لاختبار الصوت والحركة والترجمة. ${visuals}`;
+    if (provider === "demo") note.lastElementChild.textContent = minutes > 1
+      ? `وضع التجربة يدعم دقيقة واحدة فقط؛ اختر Groq أو Gemini أو Pollinations لفيديو ${minutes} دقائق. ${visuals}`
+      : `الوضع التجريبي بلا خدمة كتابة خارجية؛ ينشئ 16 مشهداً باللغة ${language} لاختبار دقيقة واحدة والصوت والحركة والترجمة. ${visuals}`;
     if (provider === "groq") note.lastElementChild.textContent = keys.groq ? `سيُنشأ السيناريو باللغة ${language} عبر Groq. ${visuals}` : "أضف مفتاح Groq من صفحة الإعدادات قبل البدء. يمكن استخدام فيديو Pixabay أو خلفيات متحركة محلية.";
     if (provider === "gemini") note.lastElementChild.textContent = keys.gemini ? `سيقرأ التطبيق models.list من Google، ثم يختار نموذج generateContent نشطاً ويجرب البديل عند تعذره. ${visuals}` : "أضف مفتاح Gemini من صفحة الإعدادات قبل البدء؛ يكتشف التطبيق النماذج النشطة بدلاً من اسم ثابت.";
     if (provider === "pollinations") note.lastElementChild.textContent = keys.pollinations ? `سيستخدم كتالوج Pollinations الحالي للنص. يتطلب المفتاح وقد يستهلك Pollen؛ فعّل مربع الموافقة لكل تشغيل. ${visuals}` : "أضف Pollinations API Key من الإعدادات؛ الخدمة تتطلب مفتاحاً وقد تستهلك Pollen، وليست keyless حالياً.";
@@ -220,6 +233,7 @@
         body: JSON.stringify({
           topics,
           aspect_ratio: aspectRatio,
+          duration_minutes: Number($("#duration-minutes").value),
           video_language: $("#video-language").value,
           voice: $("#voice").value,
           provider,
@@ -297,6 +311,11 @@
   keyIds.forEach(id => $(`#${id}`).addEventListener("input", updateProviderHint));
   $("#video-language").addEventListener("change", () => {
     updateVoiceOptions();
+    updateProviderHint();
+    saveSettings(false);
+  });
+  $("#duration-minutes").addEventListener("change", () => {
+    updateDurationLabel();
     updateProviderHint();
     saveSettings(false);
   });

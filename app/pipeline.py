@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import math
 import re
 import shutil
 from collections import Counter
@@ -8,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from app.media import audio_duration, create_ambient_music, make_voiceover, prepare_scene_video, render_video, transcribe_bounds, write_arabic_ass
+from app.media import audio_duration, create_ambient_music, make_voiceover, prepare_scene_video, render_video, transcribe_word_timings, write_arabic_ass
 from app.models import GenerateRequest
 from app.providers import PollinationsError, fetch_pixabay_image, fetch_pixabay_video, fetch_pollinations_image, generate_script, select_pollinations_image_model
 
@@ -20,6 +21,9 @@ STAGES = [
     ("subtitles", "مزامنة الترجمات العربية"),
     ("render", "تصيير الفيديو النهائي"),
 ]
+SCENE_CLIP_SECONDS = 4.0
+TRANSITION_SECONDS = 0.22
+SCENE_INTERVAL_SECONDS = SCENE_CLIP_SECONDS - TRANSITION_SECONDS
 
 
 def _clean_topic(value: str) -> str:
@@ -29,6 +33,44 @@ def _clean_topic(value: str) -> str:
 def _filename(topic: str, job_id: str, index: int) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", topic.lower()).strip("-")[:32] or "documentary"
     return f"{slug}-{job_id}-{index:02d}.mp4"
+
+
+def _caption_chunks(text: str, max_words: int = 5) -> list[str]:
+    words = text.split()
+    if not words:
+        return []
+    count = max(1, (len(words) + max_words - 1) // max_words)
+    base, extra = divmod(len(words), count)
+    chunks, cursor = [], 0
+    for index in range(count):
+        size = base + (1 if index < extra else 0)
+        chunks.append(" ".join(words[cursor:cursor + size]))
+        cursor += size
+    return chunks
+
+
+def _align_caption_chunks(
+    text: str, word_times: list[tuple[float, float, str]], offset: float, scene_duration: float, speech_duration: float,
+) -> list[dict[str, Any]]:
+    chunks = _caption_chunks(text)
+    if not chunks:
+        return []
+    speech_words = word_times or []
+    cue_count = len(chunks)
+    cues: list[dict[str, Any]] = []
+    for index, phrase in enumerate(chunks):
+        if speech_words:
+            left = min(len(speech_words) - 1, index * len(speech_words) // cue_count)
+            right = max(left, min(len(speech_words) - 1, (index + 1) * len(speech_words) // cue_count - 1))
+            local_start = max(0.0, speech_words[left][0] - 0.04)
+            local_end = min(scene_duration, speech_words[right][1] + 0.12)
+        else:
+            local_start = speech_duration * index / cue_count
+            local_end = speech_duration * (index + 1) / cue_count
+        local_end = min(scene_duration, max(local_start + 0.48, local_end))
+        local_start = min(max(0.0, local_start), max(0.0, scene_duration - 0.48))
+        cues.append({"start": offset + local_start, "end": offset + min(scene_duration, max(local_start + 0.48, local_end)), "text": phrase})
+    return cues
 
 
 async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str], report: Progress, outputs: Path) -> list[dict[str, Any]]:
@@ -45,35 +87,39 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
             await report(status="running", progress=min(global_progress, 99), stage=STAGES[number][0], message=f"{topic}: {message}")
 
         language_name = "العربية" if request.video_language == "ar" else "الإنجليزية"
+        requested_seconds = int(request.duration_minutes) * 60
+        scene_count = math.ceil((requested_seconds - TRANSITION_SECONDS) / SCENE_INTERVAL_SECONDS)
+        scene_interval = SCENE_INTERVAL_SECONDS
         await step(0, f"نكتب خطافاً وسيناريو من مشاهد قصيرة باللغة {language_name}.")
-        script = await generate_script(topic, request.provider, keys, request.video_language, request.aspect_ratio)
+        script = await generate_script(topic, request.provider, keys, request.video_language, request.aspect_ratio, scene_count)
         scenes = script["scenes"]
-        if len(scenes) < 8:
-            raise RuntimeError("يحتاج المحرك إلى 8 مشاهد قصيرة على الأقل لتقديم إيقاع وثائقي سريع؛ أعد المحاولة.")
+        if len(scenes) != scene_count:
+            raise RuntimeError(f"يتطلب الفيديو {scene_count} مشهداً لضبط مدته إلى {request.duration_minutes} دقيقة.")
 
         audio_paths: list[Path] = []
         speech_durations: list[float] = []
-        scene_durations: list[float] = []
+        scene_durations: list[float] = [scene_interval] * len(scenes)
         for number, scene in enumerate(scenes, start=1):
             await step(1, f"إنشاء الصوت {language_name} للمشهد {number} من {len(scenes)} بصوت {request.voice}.")
             audio_path = work / f"voice_{number:02d}.mp3"
             await make_voiceover(scene["narration"], request.voice, audio_path, rate="+10%")
             speech_time = audio_duration(audio_path)
-            if speech_time > 5.0:
-                # Re-synthesize only long micro-scenes rather than chopping a spoken word.
-                for rate in ("+22%", "+34%"):
+            if speech_time > scene_interval:
+                # Preserve the complete sentence while meeting the strict four-second visual beat.
+                for rate in ("+22%", "+34%", "+45%", "+58%"):
                     await make_voiceover(scene["narration"], request.voice, audio_path, rate=rate)
                     speech_time = audio_duration(audio_path)
-                    if speech_time <= 5.0:
+                    if speech_time <= scene_interval:
                         break
-            duration = max(3.0, speech_time + 0.12)
+            if speech_time > scene_interval:
+                raise RuntimeError(f"تعذر ضغط نطق المشهد {number} إلى 4 ثوانٍ دون قص الكلام؛ أعد المحاولة بنص أقصر.")
             speech_durations.append(speech_time)
-            scene_durations.append(duration)
             audio_paths.append(audio_path)
 
         await step(2, f"البحث عن فيديو حقيقي أو صورة سينمائية وحركة للمشهد 1 من {len(scenes)}.")
         orientation = "landscape" if request.aspect_ratio == "16:9" else "portrait"
         visual_items: list[dict[str, Any] | None] = [None] * len(scenes)
+        used_video_ids: set[str] = set()
         semaphore = asyncio.Semaphore(3)
         pollinations_unavailable = asyncio.Event()
         visual_warnings: list[str] = []
@@ -91,7 +137,9 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
                 await step(2, f"اختيار فيديو أو صورة وحركة للمشهد {number} من {len(scenes)}.")
                 if keys.pixabay.strip():
                     video_path = work / f"pixabay_{number:02d}.mp4"
-                    has_video = await fetch_pixabay_video(scene["visual_keywords"], keys.pixabay, orientation, video_path)
+                    has_video = await fetch_pixabay_video(
+                        scene["visual_keywords"], keys.pixabay, orientation, video_path, used_ids=used_video_ids
+                    )
                     if has_video:
                         visual_items[index] = {"path": video_path, "kind": "pixabay_video"}
                         return
@@ -147,6 +195,7 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
                 duration,
                 number,
                 work,
+                TRANSITION_SECONDS,
             )
             scene_videos.append(video_path)
 
@@ -154,21 +203,17 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
         captions: list[dict[str, Any]] = []
         offset = 0.0
         whisper_language = "ar" if request.video_language == "ar" else "en"
-        for scene, audio_path, duration in zip(scenes, audio_paths, scene_durations):
-            start, end, _transcript = await asyncio.to_thread(
-                transcribe_bounds, audio_path, request.whisper_model, whisper_language
+        for scene, audio_path, duration, speech_time in zip(scenes, audio_paths, scene_durations, speech_durations):
+            word_times = await asyncio.to_thread(
+                transcribe_word_timings, audio_path, request.whisper_model, whisper_language
             )
-            cue_start = max(0.0, offset + max(0.0, start - 0.10))
-            cue_end = min(offset + duration, offset + min(duration, max(start + 0.45, end + 0.22)))
-            if cue_end <= cue_start:
-                cue_end = min(offset + duration, cue_start + 0.9)
-            captions.append({"start": cue_start, "end": cue_end, "text": scene["translation_ar"]})
+            captions.extend(_align_caption_chunks(scene["translation_ar"], word_times, offset, duration, speech_time))
             offset += duration
         ass_path = work / "arabic_subtitles.ass"
         write_arabic_ass(captions, ass_path, request.aspect_ratio)
 
         await step(4, "تركيب حركة الكاميرا والصوت والموسيقى الهادئة وحرق الترجمة العربية.")
-        full_duration = sum(scene_durations)
+        full_duration = sum(scene_durations) + TRANSITION_SECONDS
         music_path = None
         if request.background_music:
             music_path = work / "ambient_documentary.mp3"
@@ -176,7 +221,7 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
         filename = _filename(topic, job_id, topic_index + 1)
         destination = outputs / filename
         await asyncio.to_thread(
-            render_video, scene_videos, audio_paths, music_path, ass_path, destination, request.aspect_ratio
+            render_video, scene_videos, audio_paths, music_path, ass_path, destination, request.aspect_ratio, scene_durations
         )
 
         pollinations_image_items = [item for item in visual_items if item and item["kind"] == "pollinations_image"]
@@ -187,6 +232,7 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
             "title": script.get("title", topic),
             "hook": script.get("hook", ""),
             "aspect_ratio": request.aspect_ratio,
+            "duration_minutes": request.duration_minutes,
             "video_language": request.video_language,
             "voice": request.voice,
             "provider": request.provider,
@@ -194,13 +240,17 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
             "demo": bool(script.get("demo")),
             "visual_source": visual_note,
             "visual_sources_by_scene": [item["kind"] if item else "local_motion" for item in visual_items],
+            "pixabay_video_ids": sorted(used_video_ids),
             "scene_count": len(scenes),
             "scene_durations_seconds": [round(value, 2) for value in scene_durations],
             "scene_speech_durations_seconds": [round(value, 2) for value in speech_durations],
             "pollinations_image_models": sorted({item["model"] for item in pollinations_image_items if item.get("model")}),
             "estimated_pollinations_image_pollen": round(estimated_pollen, 4),
             "visual_warnings": visual_warnings,
-            "camera_motion": "ffmpeg-zoompan-24fps",
+            "camera_motion": "ffmpeg-zoompan-24fps-with-crossfade",
+            "transition_seconds": TRANSITION_SECONDS,
+            "audio_mastering": {"integrated_lufs_target": -14, "true_peak_dbfs_ceiling": -1.0, "limiter": "ffmpeg-alimiter"},
+            "subtitle_chunk_count": len(captions),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "duration_seconds": round(full_duration, 2),
             "scenes": scenes,

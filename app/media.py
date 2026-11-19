@@ -80,6 +80,35 @@ def transcribe_bounds(path: Path, model_size: str = "tiny", language: str = "en"
         raise RuntimeError("تعذر تفريغ الصوت وتحديد توقيت الترجمة عبر faster-whisper. أعد المحاولة أو اختر وضعاً أصغر للنموذج.") from exc
 
 
+def transcribe_word_timings(path: Path, model_size: str = "tiny", language: str = "en") -> list[tuple[float, float, str]]:
+    """Return word-level speech timestamps; distribute segment timestamps if Whisper has no word marks."""
+    try:
+        _ensure_pyav_compatibility()
+        model = _whisper_model(model_size)
+        segments, _info = model.transcribe(
+            str(path), beam_size=1, vad_filter=True, language=language, word_timestamps=True
+        )
+        cues: list[tuple[float, float, str]] = []
+        for segment in segments:
+            words = getattr(segment, "words", None) or []
+            if words:
+                for word in words:
+                    text = str(getattr(word, "word", "")).strip()
+                    start = getattr(word, "start", None)
+                    end = getattr(word, "end", None)
+                    if text and start is not None and end is not None:
+                        cues.append((max(0.0, float(start)), max(float(start) + 0.04, float(end)), text))
+                continue
+            tokens = str(segment.text).split()
+            start, end = float(segment.start), float(segment.end)
+            if tokens:
+                step = max(0.04, (end - start) / len(tokens))
+                cues.extend((start + i * step, min(end, start + (i + 1) * step), token) for i, token in enumerate(tokens))
+        return cues
+    except Exception as exc:
+        raise RuntimeError("تعذر استخراج توقيت الكلمات عبر faster-whisper. أعد المحاولة أو اختر وضعاً أصغر للنموذج.") from exc
+
+
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     for path in (
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -153,10 +182,13 @@ def _camera_filter(width: int, height: int, duration: float, number: int) -> str
     )
 
 
-def prepare_scene_video(source: Path | None, keyword: str, destination: Path, ratio: str, duration: float, number: int, work_dir: Path) -> None:
+def prepare_scene_video(
+    source: Path | None, keyword: str, destination: Path, ratio: str, duration: float,
+    number: int, work_dir: Path, transition_tail: float = 0.0,
+) -> None:
     width, height = (1280, 720) if ratio == "16:9" else (720, 1280)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    clip_duration = max(1.0, duration)
+    clip_duration = max(1.0, duration + max(0.0, transition_tail))
     if source is None:
         source = work_dir / f"visual_{number:02d}.jpg"
         _make_artwork(source, width, height, number, keyword)
@@ -219,48 +251,104 @@ def write_arabic_ass(captions: list[dict[str, Any]], destination: Path, ratio: s
     destination.write_text("\ufeff" + "\n".join(lines) + "\n", encoding="utf-8")
 
 
-def render_video(scene_videos: list[Path], audio_paths: list[Path], music_path: Path | None, ass_path: Path, destination: Path, ratio: str) -> None:
-    from moviepy import AudioFileClip, CompositeAudioClip, VideoFileClip, concatenate_videoclips
+def _normalize_loudness(source: Path, destination: Path) -> None:
+    """Two-pass EBU R128 loudness normalization with a −1 dBFS sample limiter."""
+    analysis = subprocess.run(
+        [FFMPEG, "-hide_banner", "-nostats", "-i", str(source), "-map", "0:a:0",
+         "-af", "loudnorm=I=-14:TP=-1.0:LRA=7:print_format=json", "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    if analysis.returncode != 0:
+        raise RuntimeError("تعذر تحليل ارتفاع الصوت وفق EBU R128.")
+    import json
+    import re
+
+    candidates = re.findall(r"\{[^{}]+\}", analysis.stderr)
+    measured: dict[str, str] = {}
+    if candidates:
+        try:
+            measured = json.loads(candidates[-1])
+        except json.JSONDecodeError:
+            measured = {}
+    fields = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
+    finite = all(measured.get(name) not in (None, "-inf", "inf", "nan") for name in fields)
+    if finite:
+        loudnorm = (
+            "loudnorm=I=-14:TP=-1.0:LRA=7:"
+            f"measured_I={measured['input_i']}:measured_TP={measured['input_tp']}:"
+            f"measured_LRA={measured['input_lra']}:measured_thresh={measured['input_thresh']}:"
+            f"offset={measured['target_offset']}:linear=true:print_format=summary"
+        )
+    else:
+        loudnorm = "loudnorm=I=-14:TP=-1.0:LRA=7:print_format=summary"
+    audio_filter = f"{loudnorm},alimiter=limit=0.891251:level=false"
+    _run([
+        FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+        "-map", "0:v:0", "-map", "0:a:0", "-c:v", "copy", "-af", audio_filter,
+        "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(destination),
+    ])
+
+
+def render_video(
+    scene_videos: list[Path], audio_paths: list[Path], music_path: Path | None,
+    ass_path: Path, destination: Path, ratio: str, scene_durations: list[float] | None = None,
+) -> None:
+    from moviepy import AudioFileClip, CompositeAudioClip, CompositeVideoClip, VideoFileClip
+    from moviepy.video.fx import CrossFadeIn
 
     destination.parent.mkdir(parents=True, exist_ok=True)
-    clips = []
+    source_clips = []
+    layers = []
+    voice_sources = []
     voice_clips = []
     music_clip = None
     final_video = None
     mixed_audio = None
-    silent_path = destination.with_name(destination.stem + "_silent-captions.mp4")
+    mixed_path = destination.with_name(destination.stem + "_premaster.mp4")
+    caption_path = destination.with_name(destination.stem + "_captions.mp4")
+    width, height = (1280, 720) if ratio == "16:9" else (720, 1280)
+    fade = 0.22
     try:
         cursor = 0.0
-        for video_path, audio_path in zip(scene_videos, audio_paths):
+        for index, (video_path, audio_path) in enumerate(zip(scene_videos, audio_paths)):
             video = VideoFileClip(str(video_path), audio=False)
             voice = AudioFileClip(str(audio_path))
-            clips.append(video)
+            source_clips.append(video)
+            voice_sources.append(voice)
+            layer = video.with_start(cursor)
+            if index > 0:
+                layer = layer.with_effects([CrossFadeIn(min(fade, max(0.08, video.duration / 5)))])
+            layers.append(layer)
             voice_clips.append(voice.with_start(cursor))
-            cursor += video.duration
-        final_video = concatenate_videoclips(clips, method="compose")
+            interval = scene_durations[index] if scene_durations and index < len(scene_durations) else video.duration
+            cursor += float(interval)
+        final_duration = cursor + fade
+        final_video = CompositeVideoClip(layers, size=(width, height), bg_color=(0, 0, 0)).with_duration(final_duration)
         if music_path and music_path.is_file():
-            music_clip = AudioFileClip(str(music_path)).with_duration(cursor).with_volume_scaled(0.10)
-        mixed_audio = CompositeAudioClip(voice_clips + ([music_clip] if music_clip else [])).with_duration(cursor)
+            music_clip = AudioFileClip(str(music_path)).with_duration(final_duration).with_volume_scaled(0.10)
+        mixed_audio = CompositeAudioClip(voice_clips + ([music_clip] if music_clip else [])).with_duration(final_duration)
         final_video = final_video.with_audio(mixed_audio)
         final_video.write_videofile(
-            str(silent_path), fps=FPS, codec="libx264", audio_codec="aac", preset="ultrafast", threads=2,
+            str(mixed_path), fps=FPS, codec="libx264", audio_codec="aac", preset="ultrafast", threads=2,
             bitrate="2400k", logger=None,
         )
         escaped_ass = str(ass_path.resolve()).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
         _run([
-            FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-i", str(silent_path),
+            FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-i", str(mixed_path),
             "-vf", f"subtitles=filename='{escaped_ass}'", "-c:v", "libx264", "-preset", "veryfast", "-crf", "24",
-            "-c:a", "copy", "-movflags", "+faststart", str(destination),
+            "-c:a", "copy", "-movflags", "+faststart", str(caption_path),
         ])
+        _normalize_loudness(caption_path, destination)
     finally:
         if final_video is not None:
             final_video.close()
         if mixed_audio is not None:
             mixed_audio.close()
-        for clip in clips:
+        for clip in source_clips:
             clip.close()
-        for clip in voice_clips:
+        for clip in voice_sources:
             clip.close()
         if music_clip is not None:
             music_clip.close()
-        silent_path.unlink(missing_ok=True)
+        mixed_path.unlink(missing_ok=True)
+        caption_path.unlink(missing_ok=True)
