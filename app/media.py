@@ -202,8 +202,11 @@ def prepare_scene_video(
         quality = "27"
     _run([
         FFMPEG, "-hide_banner", "-loglevel", "error", "-y", *input_args,
-        "-t", f"{clip_duration:.3f}", "-vf", filter_graph, "-an", "-c:v", "libx264",
-        "-preset", "ultrafast", "-crf", quality, "-r", str(FPS), "-movflags", "+faststart", str(destination),
+        "-map", "0:v:0", "-map_metadata", "-1", "-map_chapters", "-1",
+        "-t", f"{clip_duration:.3f}", "-vf", filter_graph,
+        "-an", "-sn", "-dn", "-c:v", "libx264",
+        "-preset", "ultrafast", "-crf", quality, "-r", str(FPS),
+        "-write_tmcd", "0", "-movflags", "+faststart", str(destination),
     ])
 
 

@@ -1,0 +1,42 @@
+version: "3.9"
+
+services:
+  docuflow:
+    image: docuflow:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
+    container_name: docuflow
+    ports:
+      - "${DOCUFLOW_PORT:-3000}:3000"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+      APP_UID: ${APP_UID:-1000}
+      APP_GID: ${APP_GID:-1000}
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      HF_HOME: /app/cache/huggingface
+      XDG_CACHE_HOME: /app/cache
+    volumes:
+      - ./data:/app/data
+      - whisper-cache:/app/cache
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=3)
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 3
+
+volumes:
+  whisper-cache:
+    name: docuflow_whisper_cache

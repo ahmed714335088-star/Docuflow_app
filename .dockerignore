@@ -1,0 +1,13 @@
+.git
+.venv
+**/__pycache__
+*.py[cod]
+*.zip
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+data/outputs/**
+data/work/**
+dist/**
