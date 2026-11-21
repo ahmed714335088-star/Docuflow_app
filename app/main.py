@@ -179,6 +179,15 @@ async def download_video(filename: str) -> FileResponse:
     return FileResponse(_safe_output(filename), media_type="video/mp4", filename=filename, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
+@app.get("/api/credits/{filename}")
+async def download_visual_credits(filename: str) -> FileResponse:
+    _safe_output(filename)
+    credits = OUTPUTS / f"{Path(filename).stem}.credits.txt"
+    if not credits.is_file():
+        raise HTTPException(status_code=404, detail="لا يوجد ملف إسناد مرئيات لهذا الفيديو.")
+    return FileResponse(credits, media_type="text/plain; charset=utf-8", filename=credits.name)
+
+
 if __name__ == "__main__":
     import uvicorn
 

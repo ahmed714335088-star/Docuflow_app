@@ -3,5 +3,6 @@
   "venv": ".venv",
   "pythonVersion": "3.11",
   "typeCheckingMode": "basic",
-  "include": ["app", "scripts"]
+  "extraPaths": ["."],
+  "include": ["app", "scripts", "tests"]
 }

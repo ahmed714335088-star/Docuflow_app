@@ -10,7 +10,10 @@ from urllib.parse import quote
 import httpx
 from PIL import Image, ImageOps
 
+from app.factual_profiles import fact_sources_for_topic, giza_demo_script, is_giza_pyramid_topic, reference_context
 from app.models import ApiKeys
+from app.visual_matching import search_tokens
+from app.visual_sources import fetch_commons_image, fetch_pixabay_image, fetch_pixabay_video
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
 GEMINI_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -74,6 +77,9 @@ def _fallback_image_prompt(keywords: str, ratio: str = "16:9") -> str:
 def demo_script(topic: str, video_language: str = "en", scene_count: int = 15) -> dict[str, Any]:
     if scene_count > 16:
         raise ValueError("وضع التجربة يدعم دقيقة واحدة فقط؛ اختر مزود نص لمدد الفيديو الأطول.")
+    if is_giza_pyramid_topic(topic):
+        return giza_demo_script(topic, video_language, scene_count)
+    raise ValueError("وضع التجربة الموثق متاح حالياً لأهرامات الجيزة فقط؛ لبقية الموضوعات اختر Gemini أو Groq.")
     scenes: list[dict[str, str]] = []
     if video_language == "ar":
         rows = list(_DEMO_AR[:scene_count])
@@ -134,6 +140,11 @@ def _parse_json(text: str, video_language: str = "en", ratio: str = "16:9", scen
     raw_scenes = payload.get("scenes")
     if not isinstance(raw_scenes, list) or not raw_scenes:
         raise ValueError("استجابة خدمة النص لا تحتوي مشاهد.")
+    first_scene = raw_scenes[0] if isinstance(raw_scenes[0], dict) else {}
+    visual_anchor = _english_text(payload.get("visual_anchor") or first_scene.get("visual_anchor"), 100)
+    anchor_tokens = search_tokens(visual_anchor)
+    if not anchor_tokens:
+        raise ValueError("لم تُرجع خدمة النص مرساة بصرية إنجليزية محددة لموضوع الفيلم.")
     normalized: list[dict[str, str]] = []
     for scene in raw_scenes[:scene_count]:
         if not isinstance(scene, dict):
@@ -142,12 +153,23 @@ def _parse_json(text: str, video_language: str = "en", ratio: str = "16:9", scen
         translation = str(scene.get("translation_ar", "")).strip()
         if video_language == "ar":
             translation = narration
-        keywords = _english_visual_keywords(scene.get("visual_keywords"))
-        image_prompt = _english_text(scene.get("image_prompt"), 900) or _fallback_image_prompt(keywords, ratio)
+        keywords = _english_text(scene.get("visual_keywords"), 180)
+        if not keywords:
+            raise ValueError("أحد المشاهد لا يحتوي استعلام بحث بصرياً إنجليزياً محدداً.")
+        if not anchor_tokens.issubset(search_tokens(keywords)):
+            keywords = f"{visual_anchor} {keywords}"[:180]
+        if not (search_tokens(keywords) - anchor_tokens):
+            raise ValueError("يجب أن يضيف استعلام المشهد فعلاً أو تفصيلاً بصرياً إلى مرساة الموضوع.")
+        image_prompt = _english_text(scene.get("image_prompt"), 900)
+        if not image_prompt:
+            raise ValueError("أحد المشاهد لا يحتوي وصفاً بصرياً إنجليزياً محدداً.")
+        if not anchor_tokens.issubset(search_tokens(image_prompt)):
+            image_prompt = f"{visual_anchor}. {image_prompt}"[:900]
         if narration and (translation or video_language == "ar"):
             normalized.append({
                 "narration": narration,
                 "translation_ar": translation,
+                "visual_anchor": visual_anchor,
                 "visual_keywords": keywords,
                 "image_prompt": image_prompt,
             })
@@ -159,6 +181,7 @@ def _parse_json(text: str, video_language: str = "en", ratio: str = "16:9", scen
     return {
         "title": str(payload.get("title") or default_title).strip()[:160],
         "hook": str(payload.get("hook") or "").strip()[:400],
+        "visual_anchor": visual_anchor,
         "scenes": normalized,
         "demo": False,
     }
@@ -176,6 +199,28 @@ def _prompt(topic: str, video_language: str = "en", ratio: str = "16:9", scene_c
 Open with a gripping two-scene hook, then build context, evidence, a turn, reveal and payoff. Do not fabricate statistics, sources, quotes, incidents or certainty; clearly distinguish documented facts from hypotheses. Keep every English sentence grammatically natural and fact-aware.
 Return exactly {scene_count} scenes. Each spoken narration must contain 4–7 short English words and fit a 3–4 second voiceover at natural pace. Every scene needs a distinct factual beat and a different visual. For each scene provide a faithful fluent Arabic translation and a specific 5–9 word ENGLISH Pixabay query naming the subject, action and setting in the narration (e.g. cargo ship storm Atlantic night; vintage airplane flying clouds archival; compass navigation map closeup; underwater methane bubbles seabed). Never use vague one-word queries like fog, ocean, mystery. No repeated query, clip idea, or generic B-roll unrelated to the sentence. Also provide a separate, concrete English image prompt showing the actual described action.
 Return ONLY valid JSON: {{"title":"short title","hook":"hook","scenes":[{{"narration":"4-7 spoken English words","translation_ar":"accurate Arabic translation","visual_keywords":"specific contextual English search query","image_prompt":"specific documentary visual for this narration"}}]}}. No markdown."""
+
+
+def _strict_prompt(topic: str, video_language: str, ratio: str, scene_count: int) -> str:
+    """Prompt for one coherent, factual story with explicit scene-to-visual anchors."""
+    frame = "vertical 9:16" if ratio == "9:16" else "horizontal 16:9"
+    target_seconds = round(scene_count * 3.78 + 0.22)
+    context = reference_context(topic, video_language)
+    if video_language == "ar":
+        grounding = f"\n\nحقائق مرجعية مقيدة استخدمها لهذا الموضوع فقط:\n{context}" if context else "\n\nاستخدم الحقائق عالية الثقة فقط. احذف التفاصيل المختلف عليها أو صغها كاحتمال، ولا تخترع رقماً أو اقتباساً أو مرجعاً."
+        return f"""اكتب فيلماً وثائقياً عربياً فصيحاً وطبيعياً عن {topic!r}، مدته نحو {target_seconds} ثانية وبصيغة {frame}.
+اكتب قصة متماسكة لا قائمة حقائق: افتتح بسؤال بصري قوي، ثم عرّف الموضوع، وقدم أدلة ومشهداً إنسانياً، وميّز ما لم يُحسم، واختم باستنتاج واضح. استخدم أفعالاً وصوراً ملموسة، وتجنب العبارات الإنشائية والتهويل. لا تختلق إحصاءات أو اقتباسات أو مصادر. ميّز الوقائع عن الفرضيات بعبارات صريحة؛ الفرضية ليست مشهداً حقيقياً.
+أعد بالضبط {scene_count} مشهداً. اجعل كل narration من 4 إلى 7 كلمات عربية منطوقة، بفكرة واحدة تلائم 3–4 ثوانٍ، وتأكد أن الجملة سليمة وطبيعية عند قراءتها بصوت مرتفع. الترجمة العربية في translation_ar يجب أن تطابق narration حرفياً.
+أعد visual_anchor واحداً ثابتاً من كلمتين إلى أربع كلمات باللغة الإنجليزية يحدد الموضوع الدقيق؛ لا تضع فيه المزاج أو نوع الصورة. يجب أن يبدأ كل visual_keywords بهذه المرساة نفسها، ثم يضيف 3–6 كلمات تصف الشيء أو الفعل أو المكان المذكور فعلاً في الجملة. اكتب وصفاً مختلفاً لكل مشهد. لا تستخدم كلمات عامة مثل fog أو ocean أو mystery أو Egypt وحدها، ولا تستخدم لقطة طبيعة أو مدينة لا صلة لها بالنص. لا تدّع أن تطابق الوسوم يثبت ما تعرضه بكسلات الصورة.
+لكل فرضية، لا تعرض رسماً أو إعادة تمثيل إلا إذا وُسمت بوضوح كتصور افتراضي. اجعل image_prompt إنجليزياً محدداً، يذكر المرساة والموضوع والفعل، ولا يضيف عناصر خيالية أو نصاً مقروءاً.
+أخرج JSON صالحاً فقط بالشكل التالي، مع استبدال نصوص المثال بقيم حقيقية لكل موضوع: {{"title":"عنوان محدد","hook":"خطاف","visual_anchor":"stable English subject anchor","scenes":[{{"narration":"جملة عربية من 4–7 كلمات","translation_ar":"الجملة نفسها","visual_keywords":"same anchor plus concrete scene terms","image_prompt":"specific, factual scene matching the narration"}}]}}.{grounding}"""
+    grounding = f"\n\nBounded source context for this topic; use only these facts:\n{context}" if context else "\n\nUse high-confidence facts only. Qualify disputed details or omit them; never invent statistics, quotations, incidents or sources."
+    return f"""Write a fluent, factual, engaging documentary short about {topic!r}, about {target_seconds} seconds long in {frame}.
+Tell one coherent story, not a list of trivia: open with a concrete visual question, establish the subject, build through evidence and one human/scientific detail, qualify what remains unknown, and end with a clear takeaway. Use vivid but restrained language. Do not invent statistics, quotations, incidents or sources. Clearly distinguish documented records from hypotheses.
+Return exactly {scene_count} scenes. Each spoken narration must contain 4–7 natural English words and fit 3–4 seconds at normal pace. Each scene must add a new beat. Provide fluent accurate Arabic translation in translation_ar.
+Return one stable visual_anchor of 2–4 English words naming the exact documentary subject, not a mood. Every visual_keywords query must begin with that exact anchor, followed by 3–6 concrete words describing the visible object, action or place actually named in the narration. Make every scene query distinct. Do not use vague terms such as fog, ocean, mystery or Egypt alone and never substitute unrelated nature/city B-roll. Metadata matching is a relevance filter, not proof of pixel-level content.
+If narration describes a hypothesis, label any drawing or reconstruction as conceptual, not as evidence. Each English image_prompt must name the same anchor and the actual subject/action, and exclude fantasy details or readable fake text.
+Return ONLY valid JSON in this shape, replacing examples with topic-specific values: {{"title":"specific title","hook":"hook","visual_anchor":"stable English subject anchor","scenes":[{{"narration":"4–7 spoken English words","translation_ar":"accurate Arabic translation","visual_keywords":"same anchor plus concrete scene terms","image_prompt":"specific factual visual matching the narration"}}]}}.{grounding}"""
 
 
 def _gemini_candidate_sort(model_id: str) -> tuple[int, tuple[int, ...], int, str]:
@@ -416,7 +461,8 @@ async def generate_script(
         if scene_count > 16:
             raise ValueError("وضع التجربة مصمم لمقطع دقيقة واحدة فقط؛ اختر Gemini أو Groq أو Pollinations للمدد الأطول.")
         return demo_script(topic, video_language, scene_count)
-    prompt = _prompt(topic, video_language, aspect_ratio, scene_count)
+    prompt = _strict_prompt(topic, video_language, aspect_ratio, scene_count)
+    fact_sources = fact_sources_for_topic(topic)
     timeout = httpx.Timeout(300.0, connect=30.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         if provider == "groq":
@@ -447,182 +493,23 @@ async def generate_script(
                 raise RuntimeError("تعذر قراءة استجابة Groq.") from exc
             result = _parse_json(text, video_language, aspect_ratio, scene_count)
             result["model"] = GROQ_MODEL
+            result["fact_sources"] = fact_sources
             return result
 
         if provider == "gemini":
             if not keys.gemini.strip():
                 raise ValueError("أدخل مفتاح Gemini في الإعدادات أو اختر الوضع التجريبي.")
-            return await _generate_gemini(client, prompt, keys.gemini.strip(), video_language, aspect_ratio, scene_count)
+            result = await _generate_gemini(client, prompt, keys.gemini.strip(), video_language, aspect_ratio, scene_count)
+            result["fact_sources"] = fact_sources
+            return result
 
         if provider == "pollinations":
-            return await _generate_pollinations(client, prompt, keys.pollinations, video_language, aspect_ratio, scene_count)
+            result = await _generate_pollinations(client, prompt, keys.pollinations, video_language, aspect_ratio, scene_count)
+            result["fact_sources"] = fact_sources
+            return result
 
     raise ValueError("مزود النص غير معروف.")
 
-
-async def fetch_pixabay_video(
-    query: str, key: str, orientation: str, destination: Path, used_ids: set[str] | None = None
-) -> bool:
-    """Download one suitable Pixabay video not already used in this film."""
-    if not key.strip():
-        return False
-    portrait = orientation == "portrait"
-    params = {
-        "key": key.strip(),
-        "q": re.sub(r"\s+", " ", _english_text(query, 100)).strip() or "documentary scene",
-        "per_page": 20,
-        "video_type": "film",
-        "safesearch": "true",
-        "order": "popular",
-        "min_width": 720 if portrait else 1280,
-        "min_height": 1280 if portrait else 720,
-    }
-    timeout = httpx.Timeout(60.0, connect=15.0)
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        try:
-            response = await client.get("https://pixabay.com/api/videos/", params=params)
-        except httpx.HTTPError as exc:
-            raise RuntimeError("تعذر الاتصال بـPixabay؛ تحقق من المفتاح والإنترنت.") from exc
-        if response.status_code in (401, 403):
-            raise RuntimeError("رفض Pixabay المفتاح. راجع مفتاح API في الإعدادات.")
-        if response.status_code >= 400:
-            raise RuntimeError(f"رفض Pixabay البحث (HTTP {response.status_code}).")
-        try:
-            hits = response.json().get("hits", [])
-        except (ValueError, AttributeError, TypeError) as exc:
-            raise RuntimeError("تعذر قراءة استجابة Pixabay.") from exc
-        if not isinstance(hits, list) or not hits:
-            return False
-
-        selected_url = ""
-        selected_id = ""
-        max_size = 90 * 1024 * 1024
-        for hit in hits:
-            variants = hit.get("videos", {}) if isinstance(hit, dict) else {}
-            hit_id = str(hit.get("id", "")).strip() if isinstance(hit, dict) else ""
-            candidates = []
-            for quality in ("large", "medium", "small", "tiny"):
-                item = variants.get(quality, {}) if isinstance(variants, dict) else {}
-                url = str(item.get("url", "")) if isinstance(item, dict) else ""
-                width = int(item.get("width", 0) or 0) if isinstance(item, dict) else 0
-                height = int(item.get("height", 0) or 0) if isinstance(item, dict) else 0
-                size = int(item.get("size", 0) or 0) if isinstance(item, dict) else 0
-                if not url.startswith("https://") or width <= 0 or height <= 0:
-                    continue
-                if size > max_size or (quality == "large" and size == 0):
-                    continue
-                if portrait and (height <= width or height < 720):
-                    continue
-                if not portrait and (width < height or width < 1280 or height < 720):
-                    continue
-                candidates.append((width * height, url))
-            if candidates:
-                best_url = max(candidates, key=lambda candidate: candidate[0])[1]
-                identity = hit_id or best_url
-                if used_ids is not None and identity in used_ids:
-                    continue
-                selected_url, selected_id = best_url, identity
-                break
-        if not selected_url:
-            return False
-
-        # Reserve the ID before the next await so simultaneous scene searches cannot pick it too.
-        if used_ids is not None and selected_id:
-            used_ids.add(selected_id)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        total = 0
-        try:
-            async with client.stream("GET", selected_url) as download:
-                download.raise_for_status()
-                with destination.open("wb") as output:
-                    async for chunk in download.aiter_bytes(1024 * 256):
-                        total += len(chunk)
-                        if total > max_size:
-                            raise RuntimeError("تجاوز مقطع Pixabay حد الحجم الآمن (90 MB).")
-                        output.write(chunk)
-        except httpx.HTTPError as exc:
-            if used_ids is not None and selected_id:
-                used_ids.discard(selected_id)
-            destination.unlink(missing_ok=True)
-            raise RuntimeError("تعذر تنزيل المقطع المرئي من Pixabay.") from exc
-        except RuntimeError:
-            if used_ids is not None and selected_id:
-                used_ids.discard(selected_id)
-            destination.unlink(missing_ok=True)
-            raise
-        if destination.exists() and destination.stat().st_size > 50_000:
-            return True
-        if used_ids is not None and selected_id:
-            used_ids.discard(selected_id)
-        destination.unlink(missing_ok=True)
-        return False
-
-
-async def fetch_pixabay_image(query: str, key: str, orientation: str, destination: Path) -> bool:
-    """Fetch an inexpensive Pixabay still as a moving Ken-Burns fallback."""
-    if not key.strip():
-        return False
-    portrait = orientation == "portrait"
-    params = {
-        "key": key.strip(),
-        "q": " ".join(query.split())[:100] or "cinematic documentary",
-        "image_type": "photo",
-        "orientation": "vertical" if portrait else "horizontal",
-        "safesearch": "true",
-        "per_page": 20,
-        "order": "popular",
-        "min_width": 720 if portrait else 1280,
-        "min_height": 1280 if portrait else 720,
-    }
-    async with httpx.AsyncClient(timeout=httpx.Timeout(55.0, connect=15.0), follow_redirects=True) as client:
-        try:
-            response = await client.get("https://pixabay.com/api/", params=params)
-        except httpx.HTTPError as exc:
-            raise RuntimeError("تعذر الاتصال بـPixabay للبحث عن صورة بديلة.") from exc
-        if response.status_code in (401, 403):
-            raise RuntimeError("رفض Pixabay المفتاح. راجع مفتاح API في الإعدادات.")
-        if response.status_code >= 400:
-            raise RuntimeError(f"رفض Pixabay بحث الصور (HTTP {response.status_code}).")
-        try:
-            hits = response.json().get("hits", [])
-        except (ValueError, AttributeError, TypeError) as exc:
-            raise RuntimeError("تعذر قراءة استجابة صور Pixabay.") from exc
-        if not isinstance(hits, list) or not hits:
-            return False
-        selected_url = ""
-        for hit in hits:
-            if not isinstance(hit, dict):
-                continue
-            image_url = str(hit.get("largeImageURL") or hit.get("webformatURL") or "")
-            width = int(hit.get("imageWidth", 0) or 0)
-            height = int(hit.get("imageHeight", 0) or 0)
-            if not image_url.startswith("https://") or width <= 0 or height <= 0:
-                continue
-            if portrait and height <= width:
-                continue
-            if not portrait and width < height:
-                continue
-            selected_url = image_url
-            break
-        if not selected_url:
-            return False
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            image_response = await client.get(selected_url)
-            image_response.raise_for_status()
-            if len(image_response.content) > 24 * 1024 * 1024:
-                return False
-            with Image.open(io.BytesIO(image_response.content)) as image:
-                size = (720, 1280) if portrait else (1280, 720)
-                image = ImageOps.fit(image.convert("RGB"), size, method=Image.Resampling.LANCZOS)
-                image.save(destination, format="JPEG", quality=91, optimize=True)
-        except httpx.HTTPError as exc:
-            destination.unlink(missing_ok=True)
-            raise RuntimeError("تعذر تنزيل صورة Pixabay البديلة.") from exc
-        except Exception as exc:
-            destination.unlink(missing_ok=True)
-            raise RuntimeError("تعذر فك صورة Pixabay المستلمة.") from exc
-    return destination.is_file() and destination.stat().st_size > 20_000
 
 
 async def select_pollinations_image_model() -> tuple[str, dict[str, Any]]:

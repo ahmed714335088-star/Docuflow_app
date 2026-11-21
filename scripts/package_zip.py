@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 ARCHIVE = DIST / "DocuFlow.zip"
 INCLUDE = [
-    "app", "public", "scripts/package_zip.py", "requirements.txt", "README.md",
+    "app", "public", "tests", "scripts/package_zip.py", "requirements.txt", "README.md", "visual-matching-research.md",
     ".env.example", ".gitignore", ".dockerignore", "Dockerfile", "docker-compose.yml",
     "docker-entrypoint.sh", "start.sh", "start.bat", "pyrightconfig.json",
 ]

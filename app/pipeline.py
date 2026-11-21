@@ -11,7 +11,7 @@ from typing import Any, Awaitable, Callable
 
 from app.media import audio_duration, create_ambient_music, make_voiceover, prepare_scene_video, render_video, transcribe_word_timings, write_arabic_ass
 from app.models import GenerateRequest
-from app.providers import PollinationsError, fetch_pixabay_image, fetch_pixabay_video, fetch_pollinations_image, generate_script, select_pollinations_image_model
+from app.providers import PollinationsError, fetch_commons_image, fetch_pixabay_image, fetch_pixabay_video, fetch_pollinations_image, generate_script, select_pollinations_image_model
 
 Progress = Callable[..., Awaitable[None]]
 STAGES = [
@@ -120,6 +120,8 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
         orientation = "landscape" if request.aspect_ratio == "16:9" else "portrait"
         visual_items: list[dict[str, Any] | None] = [None] * len(scenes)
         used_video_ids: set[str] = set()
+        used_image_ids: set[str] = set()
+        used_commons_titles: set[str] = set()
         semaphore = asyncio.Semaphore(3)
         pollinations_unavailable = asyncio.Event()
         visual_warnings: list[str] = []
@@ -135,14 +137,32 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
             async with semaphore:
                 number = index + 1
                 await step(2, f"اختيار فيديو أو صورة وحركة للمشهد {number} من {len(scenes)}.")
+                anchor = scene.get("visual_anchor", "")
                 if keys.pixabay.strip():
                     video_path = work / f"pixabay_{number:02d}.mp4"
-                    has_video = await fetch_pixabay_video(
-                        scene["visual_keywords"], keys.pixabay, orientation, video_path, used_ids=used_video_ids
+                    video_asset = await fetch_pixabay_video(
+                        scene["visual_keywords"], keys.pixabay, orientation, video_path,
+                        used_ids=used_video_ids, visual_anchor=anchor,
                     )
-                    if has_video:
-                        visual_items[index] = {"path": video_path, "kind": "pixabay_video"}
+                    if video_asset:
+                        visual_items[index] = video_asset
                         return
+                    image_path = work / f"pixabay_still_{number:02d}.jpg"
+                    image_asset = await fetch_pixabay_image(
+                        scene["visual_keywords"], keys.pixabay, orientation, image_path,
+                        used_ids=used_image_ids, visual_anchor=anchor,
+                    )
+                    if image_asset:
+                        visual_items[index] = image_asset
+                        return
+                commons_path = work / f"commons_{number:02d}.jpg"
+                commons_asset = await fetch_commons_image(
+                    scene["visual_keywords"], anchor, orientation, commons_path,
+                    used_titles=used_commons_titles,
+                )
+                if commons_asset:
+                    visual_items[index] = commons_asset
+                    return
                 if request.allow_pollinations and keys.pollinations.strip() and not pollinations_unavailable.is_set():
                     image_path = work / f"pollinations_{number:02d}.jpg"
                     try:
@@ -160,31 +180,35 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
                         visual_warnings.append(f"المشهد {number}: {exc}")
                         if exc.status_code in (401, 402, 403):
                             pollinations_unavailable.set()
-                if keys.pixabay.strip():
-                    image_path = work / f"pixabay_still_{number:02d}.jpg"
-                    has_image = await fetch_pixabay_image(scene["visual_keywords"], keys.pixabay, orientation, image_path)
-                    if has_image:
-                        visual_items[index] = {"path": image_path, "kind": "pixabay_image"}
-                        return
-                visual_items[index] = {"path": None, "kind": "local_motion"}
+                visual_items[index] = None
 
         await asyncio.gather(*(resolve_visual(index, scene) for index, scene in enumerate(scenes)))
-        sources = [item["path"] if item else None for item in visual_items]
-        source_counts = Counter(item["kind"] for item in visual_items if item)
+        missing = [index for index, item in enumerate(visual_items, start=1) if item is None]
+        if missing:
+            details = "; ".join(f"{index}: {scenes[index - 1]['visual_keywords']}" for index in missing[:5])
+            more = f"، إضافة إلى {len(missing) - 5} مشاهد أخرى" if len(missing) > 5 else ""
+            shutil.rmtree(work, ignore_errors=True)
+            raise RuntimeError(
+                f"توقّف الإنتاج قبل التصيير: لم نعثر على أصل بصري موثوق الصلة لـ{len(missing)} من {len(scenes)} مشهداً. "
+                f"لا تُستخدم خلفية عامة بديلة. راجع الاستعلامات أو أضف Pixabay API Key. المشاهد: {details}{more}"
+            )
+        assets = [item for item in visual_items if item is not None]
+        sources = [item["path"] for item in assets]
+        source_counts = Counter(item["kind"] for item in assets)
         source_parts = []
         if source_counts["pixabay_video"]:
             source_parts.append(f"فيديو Pixabay: {source_counts['pixabay_video']}")
         if source_counts["pixabay_image"]:
             source_parts.append(f"صور Pixabay بحركة كاميرا: {source_counts['pixabay_image']}")
+        if source_counts["commons_image"]:
+            source_parts.append(f"صور Wikimedia Commons مرخّصة: {source_counts['commons_image']}")
         if source_counts["pollinations_image"]:
             source_parts.append(f"صور Pollinations متحركة: {source_counts['pollinations_image']}")
-        if source_counts["local_motion"]:
-            source_parts.append(f"خلفيات محلية بحركة كاميرا: {source_counts['local_motion']}")
         visual_note = " · ".join(source_parts) or "مشاهد بحركة كاميرا"
 
         scene_videos: list[Path] = []
         for number, (scene, source, duration) in enumerate(zip(scenes, sources, scene_durations), start=1):
-            visual_path = source if source is not None else None
+            visual_path = source
             video_path = work / f"scene_{number:02d}.mp4"
             await asyncio.to_thread(
                 prepare_scene_video,
@@ -226,6 +250,18 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
 
         pollinations_image_items = [item for item in visual_items if item and item["kind"] == "pollinations_image"]
         estimated_pollen = sum(float(item.get("estimated_pollen_per_image", 0.0) or 0.0) for item in pollinations_image_items)
+        visual_credits = [
+            {
+                "scene": index,
+                "title": item.get("title", ""),
+                "artist": item.get("artist", ""),
+                "license": item.get("license", ""),
+                "license_url": item.get("license_url", ""),
+                "page_url": item.get("page_url", ""),
+            }
+            for index, item in enumerate(visual_items, start=1)
+            if item and item.get("kind") == "commons_image"
+        ]
         metadata = {
             "filename": filename,
             "topic": topic,
@@ -238,9 +274,13 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
             "provider": request.provider,
             "script_model": script.get("model", ""),
             "demo": bool(script.get("demo")),
+            "visual_anchor": script.get("visual_anchor") or (scenes[0].get("visual_anchor") if scenes else ""),
+            "fact_sources": script.get("fact_sources", []),
             "visual_source": visual_note,
-            "visual_sources_by_scene": [item["kind"] if item else "local_motion" for item in visual_items],
+            "visual_sources_by_scene": [item["kind"] for item in assets],
             "pixabay_video_ids": sorted(used_video_ids),
+            "pixabay_image_ids": sorted(used_image_ids),
+            "commons_visual_credits": visual_credits,
             "scene_count": len(scenes),
             "scene_durations_seconds": [round(value, 2) for value in scene_durations],
             "scene_speech_durations_seconds": [round(value, 2) for value in speech_durations],
@@ -258,6 +298,15 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
         (outputs / f"{Path(filename).stem}.meta.json").write_text(
             json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        if visual_credits:
+            credit_lines = ["Wikimedia Commons image credits", ""]
+            for credit in visual_credits:
+                credit_lines.append(
+                    f"Scene {credit['scene']}: {credit['title']} — {credit['artist']} — {credit['license']} ({credit['license_url']}) — {credit['page_url']}"
+                )
+            outputs.joinpath(f"{Path(filename).stem}.credits.txt").write_text(
+                "\n".join(credit_lines) + "\n", encoding="utf-8"
+            )
         results.append(metadata)
         shutil.rmtree(work, ignore_errors=True)
         await report(

@@ -100,12 +100,12 @@
     const minutes = Number($("#duration-minutes").value || 1);
     const keys = keysFromInputs();
     const visuals = keys.pixabay
-      ? "سيجرب Pixabay أولاً، ثم صورة Pollinations بعد موافقتك؛ وإلا يستخدم خلفية متحركة محلية."
-      : "بدون Pixabay يستخدم خلفية محلية متحركة، أو صورة Pollinations بمفتاح وموافقة صريحة.";
+      ? "سيقبل Pixabay فقط عندما تتوافق الوسوم مع موضوع الفيلم والمشهد؛ ثم يبحث عن صورة Commons مرخصة مع إسناد. إن لم يجد أصلاً مطابقاً، يوقف المهمة."
+      : "سيبحث عن صورة Commons مرخصة ومطابقة لكل مشهد ويحتفظ بملف الإسناد؛ لا تُستخدم خلفية عامة عند فشل المطابقة.";
     if (provider === "demo") note.lastElementChild.textContent = minutes > 1
-      ? `وضع التجربة يدعم دقيقة واحدة فقط؛ اختر Groq أو Gemini أو Pollinations لفيديو ${minutes} دقائق. ${visuals}`
-      : `الوضع التجريبي بلا خدمة كتابة خارجية؛ ينشئ 16 مشهداً باللغة ${language} لاختبار دقيقة واحدة والصوت والحركة والترجمة. ${visuals}`;
-    if (provider === "groq") note.lastElementChild.textContent = keys.groq ? `سيُنشأ السيناريو باللغة ${language} عبر Groq. ${visuals}` : "أضف مفتاح Groq من صفحة الإعدادات قبل البدء. يمكن استخدام فيديو Pixabay أو خلفيات متحركة محلية.";
+      ? `وضع العينة يدعم دقيقة واحدة فقط؛ اختر Groq أو Gemini أو Pollinations لفيديو ${minutes} دقائق. ${visuals}`
+      : `وضع العينة يستخدم سيناريو موثقاً لأهرامات الجيزة فقط. قد يتوقف قبل التصيير إن لم يجد 16 أصلاً مطابقاً؛ لا يستخدم خلفيات عامة. لبقية الموضوعات اختر مزود نص. ${visuals}`;
+    if (provider === "groq") note.lastElementChild.textContent = keys.groq ? `سيُنشأ السيناريو باللغة ${language} عبر Groq. ${visuals}` : "أضف مفتاح Groq من صفحة الإعدادات قبل البدء. الخلفيات العامة غير مقبولة بديلاً.";
     if (provider === "gemini") note.lastElementChild.textContent = keys.gemini ? `سيقرأ التطبيق models.list من Google، ثم يختار نموذج generateContent نشطاً ويجرب البديل عند تعذره. ${visuals}` : "أضف مفتاح Gemini من صفحة الإعدادات قبل البدء؛ يكتشف التطبيق النماذج النشطة بدلاً من اسم ثابت.";
     if (provider === "pollinations") note.lastElementChild.textContent = keys.pollinations ? `سيستخدم كتالوج Pollinations الحالي للنص. يتطلب المفتاح وقد يستهلك Pollen؛ فعّل مربع الموافقة لكل تشغيل. ${visuals}` : "أضف Pollinations API Key من الإعدادات؛ الخدمة تتطلب مفتاحاً وقد تستهلك Pollen، وليست keyless حالياً.";
     const consent = $("#pollinations-consent");
@@ -173,6 +173,10 @@
     const sceneCount = Number(result.scene_count || (result.scenes || []).length || 0);
     $("#result-meta").textContent = `${language} · ${result.aspect_ratio || "16:9"} · ${mins}:${String(secs).padStart(2, "0")} · ${sceneCount} مشهداً · ${result.voice || "edge-tts"} · ${result.script_model || "demo"}`;
     $("#result-source").textContent = `${result.demo ? "وضع تجريبي · " : ""}${result.visual_source || "مرئيات متحركة"}`;
+    const credits = $("#credits-button");
+    credits.hidden = !Array.isArray(result.commons_visual_credits) || result.commons_visual_credits.length === 0;
+    credits.href = `/api/credits/${encodeURIComponent(result.filename)}`;
+    credits.download = `${result.filename.replace(/\.mp4$/i, "")}.credits.txt`;
     $("#result-section").hidden = false;
     $("#result-section").scrollIntoView({ behavior: "smooth", block: "start" });
     refreshHistory();
@@ -280,7 +284,11 @@
         const actions = document.createElement("div"); actions.className = "history-actions";
         const play = document.createElement("button"); play.type = "button"; play.textContent = "معاينة"; play.addEventListener("click", () => { navigate("studio"); displayResult(item); });
         const download = document.createElement("a"); download.href = `/api/download/${encodeURIComponent(item.filename)}`; download.download = item.filename; download.textContent = "تنزيل MP4";
-        actions.append(play, download); body.append(title, meta, actions); card.append(thumb, body); grid.append(card);
+        actions.append(play, download);
+        if (Array.isArray(item.commons_visual_credits) && item.commons_visual_credits.length) {
+          const credits = document.createElement("a"); credits.href = `/api/credits/${encodeURIComponent(item.filename)}`; credits.download = `${item.filename.replace(/\.mp4$/i, "")}.credits.txt`; credits.textContent = "إسناد الصور"; actions.append(credits);
+        }
+        body.append(title, meta, actions); card.append(thumb, body); grid.append(card);
       });
     } catch (_) { /* Keep the dashboard usable if history is temporarily unavailable. */ }
   }
