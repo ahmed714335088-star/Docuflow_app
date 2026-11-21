@@ -59,8 +59,23 @@ def visual_relevance_score(metadata: str, visual_anchor: str, query: str) -> int
     return len(anchor_hits) * 100 + len(scene_hits) * 10 + min(len(metadata_tokens), 99)
 
 
+def pixabay_video_tags_match(tags: str, visual_anchor: str, query: str) -> bool:
+    """Require subject and at least two concrete scene terms in Pixabay's tags."""
+    anchor_tokens = search_tokens(visual_anchor)
+    tag_tokens = search_tokens(tags)
+    query_counts = Counter(_meaningful_tokens(query))
+    query_counts.subtract(Counter(_meaningful_tokens(visual_anchor)))
+    scene_tokens = {token for token, count in query_counts.items() if count > 0}
+    if not anchor_tokens or not scene_tokens:
+        return False
+    if len(anchor_tokens & tag_tokens) < min(2, len(anchor_tokens)):
+        return False
+    return len(scene_tokens & tag_tokens) >= min(2, len(scene_tokens))
+
+
 def rank_pixabay_hits(
-    hits: list[dict[str, Any]], query: str, visual_anchor: str, used_ids: set[str] | None = None
+    hits: list[dict[str, Any]], query: str, visual_anchor: str, used_ids: set[str] | None = None,
+    strict_tags: bool = False,
 ) -> list[dict[str, Any]]:
     """Return matching Pixabay candidates, best metadata match first, without used IDs."""
     used = used_ids or set()
@@ -71,9 +86,11 @@ def rank_pixabay_hits(
         identity = str(hit.get("id") or hit.get("pageURL") or "").strip()
         if identity and identity in used:
             continue
-        metadata = " ".join(
-            str(hit.get(field, ""))
-            for field in ("tags", "title", "description", "pageURL")
+        tags = str(hit.get("tags", ""))
+        if strict_tags and not pixabay_video_tags_match(tags, visual_anchor, query):
+            continue
+        metadata = tags if strict_tags else " ".join(
+            str(hit.get(field, "")) for field in ("tags", "title", "description", "pageURL")
         )
         score = visual_relevance_score(metadata, visual_anchor, query)
         if score is not None:

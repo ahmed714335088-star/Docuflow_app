@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 class ApiKeys(BaseModel):
     groq: str = ""
     gemini: str = ""
+    claude: str = ""
     pixabay: str = ""
     pollinations: str = ""
 
@@ -16,7 +17,9 @@ class GenerateRequest(BaseModel):
     duration_minutes: Literal[1, 3, 5, 10] = 1
     video_language: Literal["en", "ar"] = "en"
     voice: str = "en-US-ChristopherNeural"
-    provider: Literal["demo", "groq", "gemini", "pollinations"] = "demo"
+    voice_rate: int = Field(default=-12, ge=-25, le=10)
+    provider: Literal["demo", "groq", "gemini", "claude", "pollinations"] = "demo"
+    allow_gemini_images: bool = False
     allow_pollinations: bool = False
     keys: ApiKeys = Field(default_factory=ApiKeys)
     whisper_model: Literal["tiny", "base", "small"] = "tiny"

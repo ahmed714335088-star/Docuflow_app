@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import io
 import json
 import re
@@ -13,11 +15,19 @@ from PIL import Image, ImageOps
 from app.factual_profiles import fact_sources_for_topic, giza_demo_script, is_giza_pyramid_topic, reference_context
 from app.models import ApiKeys
 from app.visual_matching import search_tokens
-from app.visual_sources import fetch_commons_image, fetch_pixabay_image, fetch_pixabay_video
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
 GEMINI_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+CLAUDE_MODELS_URL = "https://api.anthropic.com/v1/models"
+CLAUDE_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
+CLAUDE_VERSION = "2023-06-01"
 POLLINATIONS_BASE = "https://gen.pollinations.ai"
+
+
+class GeminiImageError(RuntimeError):
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class PollinationsError(RuntimeError):
@@ -75,7 +85,7 @@ def _fallback_image_prompt(keywords: str, ratio: str = "16:9") -> str:
 
 
 def demo_script(topic: str, video_language: str = "en", scene_count: int = 15) -> dict[str, Any]:
-    if scene_count > 16:
+    if scene_count > 20:
         raise ValueError("وضع التجربة يدعم دقيقة واحدة فقط؛ اختر مزود نص لمدد الفيديو الأطول.")
     if is_giza_pyramid_topic(topic):
         return giza_demo_script(topic, video_language, scene_count)
@@ -165,6 +175,9 @@ def _parse_json(text: str, video_language: str = "en", ratio: str = "16:9", scen
             raise ValueError("أحد المشاهد لا يحتوي وصفاً بصرياً إنجليزياً محدداً.")
         if not anchor_tokens.issubset(search_tokens(image_prompt)):
             image_prompt = f"{visual_anchor}. {image_prompt}"[:900]
+        visual_type = str(scene.get("visual_type") or "").strip().lower()
+        if visual_type not in {"ai_image", "stock_video"}:
+            raise ValueError("يجب أن يحدد الكاتب visual_type لكل مشهد: ai_image أو stock_video.")
         if narration and (translation or video_language == "ar"):
             normalized.append({
                 "narration": narration,
@@ -172,6 +185,7 @@ def _parse_json(text: str, video_language: str = "en", ratio: str = "16:9", scen
                 "visual_anchor": visual_anchor,
                 "visual_keywords": keywords,
                 "image_prompt": image_prompt,
+                "visual_type": visual_type,
             })
     if not normalized:
         raise ValueError("تعذر العثور على مشاهد صالحة في استجابة الخدمة.")
@@ -187,40 +201,45 @@ def _parse_json(text: str, video_language: str = "en", ratio: str = "16:9", scen
     }
 
 
-def _prompt(topic: str, video_language: str = "en", ratio: str = "16:9", scene_count: int = 15) -> str:
+def _prompt(
+    topic: str, video_language: str = "en", ratio: str = "16:9", scene_count: int = 15,
+    requested_seconds: int | None = None,
+) -> str:
     frame = "9:16 vertical" if ratio == "9:16" else "16:9 horizontal"
-    target_seconds = round(scene_count * 3.78 + 0.22)
+    target_seconds = requested_seconds if requested_seconds is not None else round(scene_count * 3.08 + 0.22)
     if video_language == "ar":
         return f"""اكتب سيناريو وثائقياً سريعاً وجذاباً عن: {topic!r}، بالعربية الفصحى السليمة والطبيعية، لفيديو {frame} مدته قرابة {target_seconds} ثانية.
 ابدأ بخطاف قوي في أول مشهدين، ثم قدّم سياقاً وأدلة وتحولاً وكشفاً وخاتمة. اجعل كل جملة دقيقة نحوياً وموجزة وسهلة النطق، وتجنب الترجمة الحرفية. ميّز الوقائع الموثقة عن الفرضيات: استخدم صياغة مثل «تشير التقارير التاريخية إلى…» للوقائع المنقولة، و«تطرح بعض الفرضيات…» للنظريات؛ لا تخترع أرقاماً أو مصادر أو أحداثاً، ولا تعرض فرضية على أنها حقيقة.
-أعد بالضبط {scene_count} مشهداً. اجعل narration لكل مشهد 4–7 كلمات عربية منطوقة، مناسبة لـ3–4 ثوانٍ بسرعة طبيعية، وبفكرة واحدة. قسّم الحجة مشهداً مشهداً ولا تكرر المعلومة أو الصورة. في visual_keywords اكتب استعلاماً تصويرياً إنجليزياً محدداً، عادة 5–9 كلمات، يصف الشيء والفعل والبيئة في هذا المشهد (مثال: cargo ship storm Atlantic night؛ vintage airplane flying clouds archival؛ compass navigation map closeup؛ underwater methane bubbles seabed). ممنوع الكلمات العامة المفردة مثل fog أو ocean أو mystery. اجعل استعلام كل مشهد مختلفاً عن كل الاستعلامات السابقة. الصورة يجب أن تعرض ما يقوله narration فعلياً لا مجرد جو عام. أضف image_prompt إنجليزياً واقعياً مطابقاً للسرد.
-اجعل translation_ar مطابقة للسرد العربي حرفياً. أعد JSON فقط بالشكل: {{"title":"عنوان عربي موجز","hook":"خطاف عربي","scenes":[{{"narration":"جملة عربية قصيرة دقيقة","translation_ar":"نفس الجملة","visual_keywords":"specific English search query","image_prompt":"context-specific English documentary image prompt"}}]}}. لا تضف Markdown."""
+أعد بالضبط {scene_count} مشهداً. اجعل narration لكل مشهد 4–5 كلمات عربية منطوقة، تلائم نحو 2.6 ثانية كحد أقصى عند سرعة الراوي المختارة، وبفكرة واحدة. لا تعتمد على تسريع تلقائي؛ الوقفة بين المشاهد نصف ثانية. قسّم الحجة مشهداً مشهداً ولا تكرر المعلومة أو الصورة. في visual_keywords اكتب استعلاماً تصويرياً إنجليزياً محدداً، عادة 5–9 كلمات، يصف الشيء والفعل والبيئة في هذا المشهد (مثال: cargo ship storm Atlantic night؛ vintage airplane flying clouds archival؛ compass navigation map closeup؛ underwater methane bubbles seabed). ممنوع الكلمات العامة المفردة مثل fog أو ocean أو mystery. اجعل استعلام كل مشهد مختلفاً عن كل الاستعلامات السابقة. الصورة يجب أن تعرض ما يقوله narration فعلياً لا مجرد جو عام. أضف image_prompt إنجليزياً واقعياً مطابقاً للسرد.
+اختر visual_type بقيمة ai_image للأحداث التاريخية والألغاز والمفاهيم العلمية والفرضيات والسرد الدرامي؛ أو stock_video فقط لفعل واقعي ملموس تلائمه لقطة مخزون مطابقة. لا تختر stock_video للمزاج أو اللقطات العامة. اجعل translation_ar مطابقة للسرد العربي حرفياً. أعد JSON فقط بالشكل: {{"title":"عنوان عربي موجز","hook":"خطاف عربي","visual_anchor":"stable English subject anchor","scenes":[{{"narration":"جملة عربية قصيرة دقيقة","translation_ar":"نفس الجملة","visual_type":"ai_image","visual_keywords":"specific English search query","image_prompt":"context-specific English documentary image prompt"}}]}}. لا تضف Markdown."""
     return f"""Create a factual, fast-paced, highly engaging documentary script about: {topic!r}, for {frame}, about {target_seconds} seconds long.
 Open with a gripping two-scene hook, then build context, evidence, a turn, reveal and payoff. Do not fabricate statistics, sources, quotes, incidents or certainty; clearly distinguish documented facts from hypotheses. Keep every English sentence grammatically natural and fact-aware.
-Return exactly {scene_count} scenes. Each spoken narration must contain 4–7 short English words and fit a 3–4 second voiceover at natural pace. Every scene needs a distinct factual beat and a different visual. For each scene provide a faithful fluent Arabic translation and a specific 5–9 word ENGLISH Pixabay query naming the subject, action and setting in the narration (e.g. cargo ship storm Atlantic night; vintage airplane flying clouds archival; compass navigation map closeup; underwater methane bubbles seabed). Never use vague one-word queries like fog, ocean, mystery. No repeated query, clip idea, or generic B-roll unrelated to the sentence. Also provide a separate, concrete English image prompt showing the actual described action.
-Return ONLY valid JSON: {{"title":"short title","hook":"hook","scenes":[{{"narration":"4-7 spoken English words","translation_ar":"accurate Arabic translation","visual_keywords":"specific contextual English search query","image_prompt":"specific documentary visual for this narration"}}]}}. No markdown."""
+Return exactly {scene_count} scenes. Each spoken narration must contain 4–5 short English words and fit within about 2.6 seconds at the requested narrator rate. Do not assume automatic speed-up; every scene has a 0.5 second silent gap after speech. Every scene needs a distinct factual beat and a different visual. For each scene provide a faithful fluent Arabic translation and a specific 5–9 word ENGLISH Pixabay query naming the subject, action and setting in the narration (e.g. cargo ship storm Atlantic night; vintage airplane flying clouds archival; compass navigation map closeup; underwater methane bubbles seabed). Never use vague one-word queries like fog, ocean, mystery. No repeated query, clip idea, or generic B-roll unrelated to the sentence. Also provide a separate, concrete English image prompt showing the actual described action.
+Set visual_type to ai_image for historical events, mysteries, scientific concepts, hypotheses and dramatic storytelling; use stock_video only for concrete observable actions that an exact stock clip can show, never for generic B-roll or mood. Return ONLY valid JSON: {{"title":"short title","hook":"hook","visual_anchor":"stable English subject anchor","scenes":[{{"narration":"4-7 spoken English words","translation_ar":"accurate Arabic translation","visual_type":"ai_image","visual_keywords":"specific contextual English search query","image_prompt":"specific documentary visual for this narration"}}]}}. No markdown."""
 
 
-def _strict_prompt(topic: str, video_language: str, ratio: str, scene_count: int) -> str:
+def _strict_prompt(
+    topic: str, video_language: str, ratio: str, scene_count: int, requested_seconds: int | None = None,
+) -> str:
     """Prompt for one coherent, factual story with explicit scene-to-visual anchors."""
     frame = "vertical 9:16" if ratio == "9:16" else "horizontal 16:9"
-    target_seconds = round(scene_count * 3.78 + 0.22)
+    target_seconds = requested_seconds if requested_seconds is not None else round(scene_count * 3.08 + 0.22)
     context = reference_context(topic, video_language)
     if video_language == "ar":
         grounding = f"\n\nحقائق مرجعية مقيدة استخدمها لهذا الموضوع فقط:\n{context}" if context else "\n\nاستخدم الحقائق عالية الثقة فقط. احذف التفاصيل المختلف عليها أو صغها كاحتمال، ولا تخترع رقماً أو اقتباساً أو مرجعاً."
         return f"""اكتب فيلماً وثائقياً عربياً فصيحاً وطبيعياً عن {topic!r}، مدته نحو {target_seconds} ثانية وبصيغة {frame}.
 اكتب قصة متماسكة لا قائمة حقائق: افتتح بسؤال بصري قوي، ثم عرّف الموضوع، وقدم أدلة ومشهداً إنسانياً، وميّز ما لم يُحسم، واختم باستنتاج واضح. استخدم أفعالاً وصوراً ملموسة، وتجنب العبارات الإنشائية والتهويل. لا تختلق إحصاءات أو اقتباسات أو مصادر. ميّز الوقائع عن الفرضيات بعبارات صريحة؛ الفرضية ليست مشهداً حقيقياً.
-أعد بالضبط {scene_count} مشهداً. اجعل كل narration من 4 إلى 7 كلمات عربية منطوقة، بفكرة واحدة تلائم 3–4 ثوانٍ، وتأكد أن الجملة سليمة وطبيعية عند قراءتها بصوت مرتفع. الترجمة العربية في translation_ar يجب أن تطابق narration حرفياً.
+أعد بالضبط {scene_count} مشهداً. اجعل كل narration من 4 إلى 5 كلمات عربية منطوقة، بفكرة واحدة تلائم نحو 2.6 ثانية كحد أقصى عند سرعة الراوي المطلوبة؛ لا تسرّع الجمل تلقائياً، وبين المشاهد وقفة 0.5 ثانية. وتأكد أن الجملة سليمة وطبيعية عند قراءتها بصوت مرتفع. الترجمة العربية في translation_ar يجب أن تطابق narration حرفياً.
 أعد visual_anchor واحداً ثابتاً من كلمتين إلى أربع كلمات باللغة الإنجليزية يحدد الموضوع الدقيق؛ لا تضع فيه المزاج أو نوع الصورة. يجب أن يبدأ كل visual_keywords بهذه المرساة نفسها، ثم يضيف 3–6 كلمات تصف الشيء أو الفعل أو المكان المذكور فعلاً في الجملة. اكتب وصفاً مختلفاً لكل مشهد. لا تستخدم كلمات عامة مثل fog أو ocean أو mystery أو Egypt وحدها، ولا تستخدم لقطة طبيعة أو مدينة لا صلة لها بالنص. لا تدّع أن تطابق الوسوم يثبت ما تعرضه بكسلات الصورة.
-لكل فرضية، لا تعرض رسماً أو إعادة تمثيل إلا إذا وُسمت بوضوح كتصور افتراضي. اجعل image_prompt إنجليزياً محدداً، يذكر المرساة والموضوع والفعل، ولا يضيف عناصر خيالية أو نصاً مقروءاً.
-أخرج JSON صالحاً فقط بالشكل التالي، مع استبدال نصوص المثال بقيم حقيقية لكل موضوع: {{"title":"عنوان محدد","hook":"خطاف","visual_anchor":"stable English subject anchor","scenes":[{{"narration":"جملة عربية من 4–7 كلمات","translation_ar":"الجملة نفسها","visual_keywords":"same anchor plus concrete scene terms","image_prompt":"specific, factual scene matching the narration"}}]}}.{grounding}"""
+لكل مشهد اختر visual_type واحداً: ai_image للأحداث التاريخية والألغاز والمفاهيم العلمية والفرضيات والسرد الدرامي؛ أو stock_video فقط لفعل واقعي ملموس يمكن لمقطع مخزون مطابق عرضه فعلاً. لا تختر stock_video لمجرد الجو العام. إذا اخترت stock_video فاجعل استعلامه قابلاً للتحقق بوسوم دقيقة. وسم إعادة بناء الفرضية بأنها تصور لا دليل. image_prompt محدد ويطابق المرساة والسرد دون خيال أو كتابة مقروءة.
+أخرج JSON صالحاً فقط بالشكل التالي: {{"title":"عنوان محدد","hook":"خطاف","visual_anchor":"stable English subject anchor","scenes":[{{"narration":"جملة عربية قصيرة","translation_ar":"الجملة نفسها","visual_type":"ai_image","visual_keywords":"same anchor plus concrete scene terms","image_prompt":"specific scene matching narration"}}]}}.{grounding}"""
     grounding = f"\n\nBounded source context for this topic; use only these facts:\n{context}" if context else "\n\nUse high-confidence facts only. Qualify disputed details or omit them; never invent statistics, quotations, incidents or sources."
     return f"""Write a fluent, factual, engaging documentary short about {topic!r}, about {target_seconds} seconds long in {frame}.
 Tell one coherent story, not a list of trivia: open with a concrete visual question, establish the subject, build through evidence and one human/scientific detail, qualify what remains unknown, and end with a clear takeaway. Use vivid but restrained language. Do not invent statistics, quotations, incidents or sources. Clearly distinguish documented records from hypotheses.
-Return exactly {scene_count} scenes. Each spoken narration must contain 4–7 natural English words and fit 3–4 seconds at normal pace. Each scene must add a new beat. Provide fluent accurate Arabic translation in translation_ar.
+Return exactly {scene_count} scenes. Each spoken narration must contain 4–5 natural English words and fit within about 2.6 seconds at the requested narrator rate. Do not assume automatic speed-up; each scene has a 0.5 second pause after speech. Each scene must add a new beat. Provide fluent accurate Arabic translation in translation_ar.
 Return one stable visual_anchor of 2–4 English words naming the exact documentary subject, not a mood. Every visual_keywords query must begin with that exact anchor, followed by 3–6 concrete words describing the visible object, action or place actually named in the narration. Make every scene query distinct. Do not use vague terms such as fog, ocean, mystery or Egypt alone and never substitute unrelated nature/city B-roll. Metadata matching is a relevance filter, not proof of pixel-level content.
-If narration describes a hypothesis, label any drawing or reconstruction as conceptual, not as evidence. Each English image_prompt must name the same anchor and the actual subject/action, and exclude fantasy details or readable fake text.
-Return ONLY valid JSON in this shape, replacing examples with topic-specific values: {{"title":"specific title","hook":"hook","visual_anchor":"stable English subject anchor","scenes":[{{"narration":"4–7 spoken English words","translation_ar":"accurate Arabic translation","visual_keywords":"same anchor plus concrete scene terms","image_prompt":"specific factual visual matching the narration"}}]}}.{grounding}"""
+For every scene set visual_type to exactly ai_image or stock_video. Use ai_image for historical events, mysteries, scientific concepts, hypotheses and dramatic storytelling. Use stock_video only for concrete observable real-world actions that matching footage can show, never for mood or generic B-roll. Pixabay tags will be checked and unrelated clips rejected. Label hypothetical reconstructions as conceptual, not evidence. image_prompt must match the subject and action and exclude fantasy or readable fake text.
+Return ONLY valid JSON in this shape: {{"title":"specific title","hook":"hook","visual_anchor":"stable English subject anchor","scenes":[{{"narration":"4–7 spoken English words","translation_ar":"accurate Arabic translation","visual_type":"ai_image","visual_keywords":"same anchor plus concrete scene terms","image_prompt":"specific factual scene matching narration"}}]}}.{grounding}"""
 
 
 def _gemini_candidate_sort(model_id: str) -> tuple[int, tuple[int, ...], int, str]:
@@ -329,6 +348,125 @@ async def _generate_gemini(
     raise RuntimeError(
         f"لم ينجح أي نموذج Gemini نشط في قائمة حسابك: {models_text}{suffix}. تحقق من المفتاح أو الحصة، أو اختر Groq/Pollinations/الوضع التجريبي."
     )
+
+
+
+def _gemini_image_model_sort(model_id: str) -> tuple[int, tuple[int, ...], str]:
+    lower = model_id.lower()
+    priority = 0 if "gemini-3.1-flash-image" in lower else 1 if "gemini-2.5-flash-image" in lower else 2 if "nano-banana" in lower else 3
+    numbers = re.search(r"gemini-(\d+(?:\.\d+)*)", lower)
+    version = tuple(int(piece) for piece in numbers.group(1).split(".")) if numbers else (0,)
+    return priority, tuple(-piece for piece in version), lower
+
+
+def _gemini_image_ids(payload: Any) -> list[str]:
+    found: set[str] = set()
+    models = payload.get("models", []) if isinstance(payload, dict) else []
+    for item in models if isinstance(models, list) else []:
+        if not isinstance(item, dict):
+            continue
+        methods = item.get("supportedGenerationMethods", [])
+        if not isinstance(methods, list) or "generateContent" not in methods:
+            continue
+        for raw in (item.get("baseModelId", ""), str(item.get("name", "")).removeprefix("models/")):
+            model_id = str(raw).strip()
+            lower = model_id.lower()
+            if model_id.startswith("gemini-") and ("image" in lower or "nano-banana" in lower):
+                found.add(model_id)
+    return sorted(found, key=_gemini_image_model_sort)
+
+
+def _extract_gemini_image(payload: Any) -> bytes | None:
+    if not isinstance(payload, dict):
+        return None
+    candidates = payload.get("candidates", [])
+    for candidate in candidates if isinstance(candidates, list) else []:
+        content = candidate.get("content", {}) if isinstance(candidate, dict) else {}
+        parts = content.get("parts", []) if isinstance(content, dict) else []
+        for part in parts if isinstance(parts, list) else []:
+            if not isinstance(part, dict):
+                continue
+            inline = part.get("inlineData") or part.get("inline_data")
+            if not isinstance(inline, dict):
+                continue
+            mime = str(inline.get("mimeType") or inline.get("mime_type") or "")
+            encoded = inline.get("data")
+            if not mime.lower().startswith("image/") or not isinstance(encoded, str):
+                continue
+            try:
+                raw = base64.b64decode(encoded, validate=True)
+            except (ValueError, binascii.Error):
+                continue
+            if raw and len(raw) <= 24 * 1024 * 1024:
+                return raw
+    return None
+
+
+async def generate_gemini_image(prompt: str, api_key: str, ratio: str, destination: Path) -> dict[str, Any]:
+    """Generate and locally normalize one native Gemini image; never substitutes generic artwork."""
+    if not api_key.strip():
+        raise RuntimeError("توليد صورة المشهد يحتاج Gemini API Key صالحاً.")
+    timeout = httpx.Timeout(180.0, connect=25.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        try:
+            listing = await client.get(GEMINI_MODELS_URL, params={"key": api_key.strip(), "pageSize": 1000})
+        except httpx.HTTPError as exc:
+            raise RuntimeError("تعذر الاتصال بقائمة نماذج Gemini للصور.") from exc
+        if listing.status_code in (401, 403):
+            raise RuntimeError("رفض Gemini مفتاح الصور أو صلاحيات الحساب.")
+        if listing.status_code >= 400:
+            raise RuntimeError(f"تعذر اكتشاف نماذج صور Gemini (HTTP {listing.status_code}).")
+        try:
+            models = _gemini_image_ids(listing.json())
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError("تعذر قراءة قائمة نماذج صور Gemini.") from exc
+        if not models:
+            raise RuntimeError("لا يعرض حساب Gemini نموذج صور generateContent نشطاً؛ لم يُستخدم نموذج نصي كبديل.")
+        attempted: list[str] = []
+        for model_id in models:
+            attempted.append(model_id)
+            image_prompt = (
+                f"Create one photorealistic cinematic documentary still for this exact scene: {prompt[:1800]}. "
+                f"Compose for {ratio}. Match the narrated subject and action, avoid unrelated scenery, "
+                "do not invent factual details, and include no readable text, labels or watermark."
+            )
+            try:
+                response = await client.post(
+                    f"{GEMINI_MODELS_URL}/{model_id}:generateContent",
+                    params={"key": api_key.strip()},
+                    json={
+                        "contents": [{"parts": [{"text": image_prompt}]}],
+                        "generationConfig": {"responseModalities": ["IMAGE"]},
+                    },
+                )
+            except httpx.HTTPError as exc:
+                raise RuntimeError("تعذر الاتصال بتوليد صور Gemini.") from exc
+            if response.status_code == 429:
+                raise GeminiImageError("بلغ Gemini حد الطلبات/الحصة لتوليد الصور (HTTP 429).", 429)
+            if response.status_code >= 400:
+                if response.status_code in (400, 404, 500, 502, 503):
+                    continue
+                if response.status_code in (401, 403):
+                    raise RuntimeError("رفض Gemini صلاحية توليد الصورة؛ تحقق من المفتاح والنموذج.")
+                raise RuntimeError(f"فشل توليد صورة Gemini (HTTP {response.status_code}).")
+            try:
+                payload = response.json()
+            except (ValueError, TypeError):
+                continue
+            raw = _extract_gemini_image(payload)
+            if raw is None:
+                continue
+            try:
+                with Image.open(io.BytesIO(raw)) as image:
+                    size = (1280, 720) if ratio == "16:9" else (720, 1280)
+                    ImageOps.fit(image.convert("RGB"), size, method=Image.Resampling.LANCZOS).save(
+                        destination, format="JPEG", quality=92, optimize=True
+                    )
+            except Exception as exc:
+                destination.unlink(missing_ok=True)
+                raise RuntimeError("أعاد Gemini محتوى لا يمكن فكّه كصورة.") from exc
+            return {"path": destination, "kind": "gemini_image", "model": model_id}
+    raise RuntimeError("لم يُرجع أي نموذج صور Gemini نشطاً بيانات صورة inlineData: " + ", ".join(attempted[:5]))
 
 
 def _catalog_list(payload: Any) -> list[dict[str, Any]]:
@@ -449,6 +587,86 @@ async def _generate_pollinations(
     )
 
 
+async def _discover_claude_sonnet_models(client: httpx.AsyncClient, api_key: str) -> list[dict[str, Any]]:
+    headers = {"x-api-key": api_key, "anthropic-version": CLAUDE_VERSION}
+    models: list[dict[str, Any]] = []
+    params: dict[str, Any] = {"limit": 100}
+    for _ in range(5):
+        try:
+            response = await client.get(CLAUDE_MODELS_URL, headers=headers, params=params)
+        except httpx.HTTPError as exc:
+            raise RuntimeError("تعذر الاتصال بقائمة نماذج Claude.") from exc
+        if response.status_code in (401, 403):
+            raise RuntimeError("رفض Anthropic مفتاح Claude أو صلاحيات قائمة النماذج.")
+        if response.status_code >= 400:
+            raise RuntimeError(f"تعذر اكتشاف نماذج Claude (HTTP {response.status_code}).")
+        try:
+            payload = response.json()
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError("تعذر قراءة قائمة نماذج Claude.") from exc
+        rows = payload.get("data", []) if isinstance(payload, dict) else []
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict) and "sonnet" in str(row.get("id", "")).lower():
+                models.append(row)
+        if not isinstance(payload, dict) or not payload.get("has_more"):
+            break
+        next_id = payload.get("last_id")
+        if not next_id:
+            break
+        params["after_id"] = str(next_id)
+    def preference(item: dict[str, Any]) -> tuple[int, str]:
+        model_id = str(item.get("id", "")).lower()
+        return (0 if "claude-sonnet-4-6" in model_id else 1 if "claude-3-5-sonnet" in model_id else 2, model_id)
+    unique = {str(item.get("id")): item for item in models if item.get("id")}
+    return sorted(unique.values(), key=preference)
+
+
+async def _generate_claude(
+    client: httpx.AsyncClient, prompt: str, api_key: str, video_language: str, aspect_ratio: str, scene_count: int
+) -> dict[str, Any]:
+    if not api_key.strip():
+        raise ValueError("أدخل Claude API Key في الإعدادات أو اختر مزوداً آخر.")
+    models = await _discover_claude_sonnet_models(client, api_key.strip())
+    if not models:
+        raise RuntimeError("لم يعرض حساب Anthropic أي نموذج Claude Sonnet نشط في قائمة النماذج.")
+    for model in models:
+        model_id = str(model["id"])
+        try:
+            response = await client.post(
+                CLAUDE_MESSAGES_URL,
+                headers={"x-api-key": api_key.strip(), "anthropic-version": CLAUDE_VERSION, "content-type": "application/json"},
+                json={
+                    "model": model_id,
+                    "max_tokens": min(24000, max(4000, scene_count * 150)),
+                    "temperature": 0.75,
+                    "system": "Return only valid JSON matching the user's requested schema. Do not add markdown.",
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+            )
+        except httpx.HTTPError as exc:
+            raise RuntimeError("تعذر الاتصال برسائل Claude.") from exc
+        if response.status_code in (401, 403):
+            raise RuntimeError("رفض Anthropic مفتاح Claude أو صلاحية إنشاء النص.")
+        if response.status_code == 429:
+            raise RuntimeError("بلغ Claude حد الطلبات أو الحصة (HTTP 429). لم يُستخدم مزود بديل بصمت.")
+        if response.status_code in (400, 404, 500, 502, 503):
+            continue
+        if response.status_code >= 400:
+            raise RuntimeError(f"رفض Claude الطلب (HTTP {response.status_code}).")
+        try:
+            payload = response.json()
+            parts = payload.get("content", [])
+            text = "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict) and part.get("type") == "text")
+            if not text:
+                raise ValueError("Claude response has no text block")
+            result = _parse_json(text, video_language, aspect_ratio, scene_count)
+        except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise RuntimeError("لم تُرجع Claude سيناريو JSON صالحاً مطابقاً للمشاهد المطلوبة.") from exc
+        result["model"] = model_id
+        return result
+    raise RuntimeError("تعذر استخدام نماذج Claude Sonnet النشطة في حسابك؛ تحقق من صلاحية Messages API.")
+
+
 async def generate_script(
     topic: str,
     provider: str,
@@ -456,12 +674,13 @@ async def generate_script(
     video_language: str = "en",
     aspect_ratio: str = "16:9",
     scene_count: int = 15,
+    requested_seconds: int | None = None,
 ) -> dict[str, Any]:
     if provider == "demo":
-        if scene_count > 16:
+        if scene_count > 20:
             raise ValueError("وضع التجربة مصمم لمقطع دقيقة واحدة فقط؛ اختر Gemini أو Groq أو Pollinations للمدد الأطول.")
         return demo_script(topic, video_language, scene_count)
-    prompt = _strict_prompt(topic, video_language, aspect_ratio, scene_count)
+    prompt = _strict_prompt(topic, video_language, aspect_ratio, scene_count, requested_seconds)
     fact_sources = fact_sources_for_topic(topic)
     timeout = httpx.Timeout(300.0, connect=30.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -500,6 +719,11 @@ async def generate_script(
             if not keys.gemini.strip():
                 raise ValueError("أدخل مفتاح Gemini في الإعدادات أو اختر الوضع التجريبي.")
             result = await _generate_gemini(client, prompt, keys.gemini.strip(), video_language, aspect_ratio, scene_count)
+            result["fact_sources"] = fact_sources
+            return result
+
+        if provider == "claude":
+            result = await _generate_claude(client, prompt, keys.claude, video_language, aspect_ratio, scene_count)
             result["fact_sources"] = fact_sources
             return result
 

@@ -19,12 +19,14 @@ def _run(command: list[str]) -> None:
         raise RuntimeError(f"فشل FFmpeg أثناء تجهيز الفيديو. {tail[-900:]}")
 
 
-async def make_voiceover(text: str, voice: str, destination: Path, rate: str = "+8%") -> None:
+async def make_voiceover(text: str, voice: str, destination: Path, rate: int = -12) -> None:
     import edge_tts
 
+    if not -25 <= rate <= 10:
+        raise ValueError("سرعة الراوي يجب أن تكون بين ‎-25% و‎+10%.")
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
-        await edge_tts.Communicate(text=text, voice=voice, rate=rate, pitch="-1Hz").save(str(destination))
+        await edge_tts.Communicate(text=text, voice=voice, rate=f"{rate:+d}%", pitch="-3Hz").save(str(destination))
     except Exception as exc:
         raise RuntimeError("تعذر إنشاء التعليق الصوتي عبر edge-tts. تحقق من اتصال الإنترنت واختيار الصوت.") from exc
 
@@ -38,6 +40,20 @@ def audio_duration(path: Path) -> float:
     if result.returncode != 0:
         raise RuntimeError("تعذر قراءة مدة ملف التعليق الصوتي.")
     return max(0.25, float(result.stdout.strip()))
+
+
+def pad_audio_with_silence(path: Path, target_duration: float) -> None:
+    """Pad voice at its tail without changing spoken speed or pitch."""
+    current = audio_duration(path)
+    if target_duration <= current + 0.015:
+        return
+    temporary = path.with_name(path.stem + "_padded.mp3")
+    _run([
+        FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-i", str(path),
+        "-map", "0:a:0", "-af", f"apad=pad_dur={target_duration - current:.3f}",
+        "-t", f"{target_duration:.3f}", "-vn", "-sn", "-dn", "-c:a", "libmp3lame", "-q:a", "3", str(temporary),
+    ])
+    temporary.replace(path)
 
 
 @lru_cache(maxsize=3)

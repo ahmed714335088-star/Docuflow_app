@@ -104,7 +104,7 @@ async def fetch_pixabay_video(
             hits = _pixabay_hits(response.json())
         except (ValueError, TypeError) as exc:
             raise RuntimeError("تعذر قراءة استجابة Pixabay.") from exc
-        candidates = rank_pixabay_hits(hits, query, visual_anchor, used_ids)
+        candidates = rank_pixabay_hits(hits, query, visual_anchor, used_ids, strict_tags=True)
         for hit in candidates:
             choice = _selected_video_variant(hit, portrait, max_size)
             if not choice:

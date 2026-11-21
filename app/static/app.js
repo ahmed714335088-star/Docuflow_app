@@ -2,7 +2,7 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const stageOrder = ["script", "voice", "visuals", "subtitles", "render"];
-  const keyIds = ["groq-key", "gemini-key", "pixabay-key", "pollinations-key"];
+  const keyIds = ["groq-key", "gemini-key", "claude-key", "pixabay-key", "pollinations-key"];
   let aspectRatio = "16:9";
   let toastTimer;
 
@@ -16,7 +16,7 @@
   }
 
   function keysFromInputs() {
-    return { groq: $("#groq-key").value.trim(), gemini: $("#gemini-key").value.trim(), pixabay: $("#pixabay-key").value.trim(), pollinations: $("#pollinations-key").value.trim() };
+    return { groq: $("#groq-key").value.trim(), gemini: $("#gemini-key").value.trim(), claude: $("#claude-key").value.trim(), pixabay: $("#pixabay-key").value.trim(), pollinations: $("#pollinations-key").value.trim() };
   }
 
   function updateVoiceOptions(preferredVoice = "") {
@@ -49,8 +49,10 @@
 
   function updateDurationLabel() {
     const minutes = Number($("#duration-minutes").value || 1);
-    const scenes = Math.ceil((minutes * 60 - 0.22) / (4 - 0.22));
-    $("#scene-duration-chip").innerHTML = `${scenes} مشهداً <i></i> 4 ثوانٍ كحد أقصى`;
+    const transition = 0.22;
+    const scenes = Math.max(1, Math.floor((minutes * 60 - transition) / (3.3 - transition)));
+    const interval = (minutes * 60 - transition) / scenes;
+    $("#scene-duration-chip").innerHTML = `${scenes} مشهداً <i></i> ${interval.toFixed(2)} ث للمشهد · صمت 0.5 ث`;
     $("#duration-note").textContent = `${scenes} مشهداً · ${minutes} ${minutes === 1 ? "دقيقة" : "دقائق"} · حتى 8 موضوعات`;
   }
 
@@ -63,6 +65,7 @@
       }
       $("#groq-key").value = values.groq || "";
       $("#gemini-key").value = values.gemini || "";
+      $("#claude-key").value = values.claude || "";
       $("#pixabay-key").value = values.pixabay || "";
       $("#pollinations-key").value = values.pollinations || "";
       if (values.provider) {
@@ -71,6 +74,8 @@
       }
       $("#video-language").value = values.video_language === "ar" ? "ar" : "en";
       $("#duration-minutes").value = [1, 3, 5, 10].includes(Number(values.duration_minutes)) ? String(values.duration_minutes) : "1";
+      $("#voice-rate").value = Number.isInteger(values.voice_rate) && values.voice_rate >= -25 && values.voice_rate <= 10 ? String(values.voice_rate) : "-12";
+      updateVoiceRateLabel();
       updateVoiceOptions(values.voice || "");
       updateDurationLabel();
       updateProviderHint();
@@ -84,6 +89,7 @@
       video_language: $("#video-language").value,
       duration_minutes: Number($("#duration-minutes").value),
       voice: $("#voice").value,
+      voice_rate: Number($("#voice-rate").value),
     };
     localStorage.setItem("docuflow.keys.v1", JSON.stringify(values));
     $("#settings-feedback").textContent = "حُفظت الإعدادات في هذا المتصفح.";
@@ -100,17 +106,26 @@
     const minutes = Number($("#duration-minutes").value || 1);
     const keys = keysFromInputs();
     const visuals = keys.pixabay
-      ? "سيقبل Pixabay فقط عندما تتوافق الوسوم مع موضوع الفيلم والمشهد؛ ثم يبحث عن صورة Commons مرخصة مع إسناد. إن لم يجد أصلاً مطابقاً، يوقف المهمة."
-      : "سيبحث عن صورة Commons مرخصة ومطابقة لكل مشهد ويحتفظ بملف الإسناد؛ لا تُستخدم خلفية عامة عند فشل المطابقة.";
+      ? "سيقبل مقاطع Pixabay التي تطابق الوسوم فقط؛ وإذا غاب المقطع المطابق يستخدم صورة Gemini بعد الموافقة، لا صورة Pixabay أو لقطة عامة."
+      : "تحتاج ai_image مفتاح Gemini وموافقة الصور؛ ويحتاج stock_video مقطع Pixabay مطابقاً أو صورة Gemini مولدة بديلاً بعد الموافقة. لا تُستخدم لقطات عامة.";
     if (provider === "demo") note.lastElementChild.textContent = minutes > 1
-      ? `وضع العينة يدعم دقيقة واحدة فقط؛ اختر Groq أو Gemini أو Pollinations لفيديو ${minutes} دقائق. ${visuals}`
-      : `وضع العينة يستخدم سيناريو موثقاً لأهرامات الجيزة فقط. قد يتوقف قبل التصيير إن لم يجد 16 أصلاً مطابقاً؛ لا يستخدم خلفيات عامة. لبقية الموضوعات اختر مزود نص. ${visuals}`;
+      ? `وضع العينة يدعم دقيقة واحدة فقط؛ اختر Groq أو Gemini أو Claude أو Pollinations لفيديو ${minutes} دقائق. ${visuals}`
+      : `وضع العينة يستخدم سيناريو موثقاً لأهرامات الجيزة فقط، لكنه يحتاج موافقة ومفتاح Gemini للمشاهد المصنفة ai_image. لبقية الموضوعات اختر مزود نص. ${visuals}`;
     if (provider === "groq") note.lastElementChild.textContent = keys.groq ? `سيُنشأ السيناريو باللغة ${language} عبر Groq. ${visuals}` : "أضف مفتاح Groq من صفحة الإعدادات قبل البدء. الخلفيات العامة غير مقبولة بديلاً.";
     if (provider === "gemini") note.lastElementChild.textContent = keys.gemini ? `سيقرأ التطبيق models.list من Google، ثم يختار نموذج generateContent نشطاً ويجرب البديل عند تعذره. ${visuals}` : "أضف مفتاح Gemini من صفحة الإعدادات قبل البدء؛ يكتشف التطبيق النماذج النشطة بدلاً من اسم ثابت.";
+    if (provider === "claude") note.lastElementChild.textContent = keys.claude ? `سيكتشف التطبيق نموذج Claude Sonnet المتاح عبر Anthropic API. قد تترتب تكلفة أو تُستهلك الحصة؛ راجع تنبيه الإعدادات. ${visuals}` : "أضف Claude API Key من صفحة الإعدادات. قد تترتب تكلفة أو تُستهلك حصة Anthropic API.";
     if (provider === "pollinations") note.lastElementChild.textContent = keys.pollinations ? `سيستخدم كتالوج Pollinations الحالي للنص. يتطلب المفتاح وقد يستهلك Pollen؛ فعّل مربع الموافقة لكل تشغيل. ${visuals}` : "أضف Pollinations API Key من الإعدادات؛ الخدمة تتطلب مفتاحاً وقد تستهلك Pollen، وليست keyless حالياً.";
     const consent = $("#pollinations-consent");
     consent.classList.toggle("is-confirmed", $("#allow-pollinations").checked);
     consent.classList.toggle("is-required", provider === "pollinations" || $("#allow-pollinations").checked);
+    const geminiConsent = $("#gemini-consent");
+    geminiConsent.classList.toggle("is-confirmed", $("#allow-gemini-images").checked);
+    geminiConsent.classList.toggle("is-required", $("#allow-gemini-images").checked);
+  }
+
+  function updateVoiceRateLabel() {
+    const rate = Number($("#voice-rate").value || -12);
+    $("#voice-rate-value").textContent = `${rate > 0 ? "+" : "−"}${Math.abs(rate)}%`;
   }
 
   function navigate(name) {
@@ -219,6 +234,9 @@
     const provider = selectedProvider();
     if (provider === "groq" && !$("#groq-key").value.trim()) { navigate("settings"); toast("أضف مفتاح Groq أولاً.", true); return; }
     if (provider === "gemini" && !$("#gemini-key").value.trim()) { navigate("settings"); toast("أضف مفتاح Gemini أولاً.", true); return; }
+    if (provider === "claude" && !$("#claude-key").value.trim()) { navigate("settings"); toast("أضف Claude API Key أولاً.", true); return; }
+    const allowGeminiImages = $("#allow-gemini-images").checked;
+    if (allowGeminiImages && !$("#gemini-key").value.trim()) { navigate("settings"); toast("موافقة توليد الصور تتطلب مفتاح Gemini صالحاً.", true); return; }
     const allowPollinations = $("#allow-pollinations").checked;
     const pollinationsKey = $("#pollinations-key").value.trim();
     if (provider === "pollinations" && !pollinationsKey) { navigate("settings"); toast("أضف Pollinations API Key أولاً.", true); return; }
@@ -240,7 +258,9 @@
           duration_minutes: Number($("#duration-minutes").value),
           video_language: $("#video-language").value,
           voice: $("#voice").value,
+          voice_rate: Number($("#voice-rate").value),
           provider,
+          allow_gemini_images: allowGeminiImages,
           allow_pollinations: allowPollinations,
           keys: keysFromInputs(),
           whisper_model: "tiny",
@@ -249,7 +269,9 @@
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "تعذر بدء الإنتاج.");
-      if (allowPollinations) { $("#allow-pollinations").checked = false; updateProviderHint(); }
+      if (allowPollinations) $("#allow-pollinations").checked = false;
+      if (allowGeminiImages) $("#allow-gemini-images").checked = false;
+      updateProviderHint();
       $("#progress-message").textContent = "بدأ خط الإنتاج — جارٍ إعداد السيناريو.";
       pollJob(data.job_id);
     } catch (error) {
@@ -329,6 +351,8 @@
   });
   $("#voice").addEventListener("change", () => saveSettings(false));
   $("#allow-pollinations").addEventListener("change", updateProviderHint);
+  $("#allow-gemini-images").addEventListener("change", updateProviderHint);
+  $("#voice-rate").addEventListener("input", () => { updateVoiceRateLabel(); saveSettings(false); });
   $("#save-settings").addEventListener("click", () => saveSettings(true));
   $("#clear-settings").addEventListener("click", () => {
     keyIds.forEach(id => { $(`#${id}`).value = ""; });

@@ -48,6 +48,10 @@ _GIZA_AR = [
     ("المنحدرات فرضيات، وليست حقيقة محسومة.", "Giza pyramids Egypt ramp theory archaeological diagram", "Clearly labeled conceptual reconstruction of a ramp hypothesis, not footage presented as fact."),
     ("والكسوة لم تكن من الرخام.", "Giza pyramids Egypt limestone casing museum fragment", "Museum display of a white limestone casing fragment associated with the Great Pyramid."),
     ("الأدلة تبرز تنظيماً بشرياً هائلاً.", "Giza pyramids Egypt plateau archaeological panorama", "Grounded final panorama of the Giza pyramids and plateau in warm natural light."),
+    ("يحفظ سجلّ مرر حركة الإمداد.", "Giza pyramids Egypt Merer diary shipment record", "Archival documentary detail of the surviving Merer diary display, without fabricated readable writing."),
+    ("وتكشف المستوطنة تفاصيل الحياة اليومية.", "Giza pyramids Egypt workers settlement daily life ruins", "Archaeological documentation of settlement remains near Giza, framed as evidence of organized site support."),
+    ("لكن بعض خطوات البناء ما زالت مجهولة.", "Giza pyramids Egypt construction method evidence blocks", "Measured documentary view of pyramid masonry, emphasizing that the exact construction sequence is unresolved."),
+    ("فالوثائق تضيق مساحة التخمين.", "Giza pyramids Egypt archaeological evidence plateau survey", "Careful archaeological survey of the Giza plateau, grounded and free of sensational claims."),
 ]
 
 _GIZA_EN = [
@@ -67,6 +71,10 @@ _GIZA_EN = [
     ("Ramp ideas remain hypotheses, not proof.", "Giza pyramids Egypt ramp theory archaeological diagram", "Clearly labeled conceptual reconstruction of a ramp hypothesis, not footage presented as fact."),
     ("The original casing was not marble.", "Giza pyramids Egypt limestone casing museum fragment", "Museum display of a white limestone casing fragment associated with the Great Pyramid."),
     ("The evidence points to organized human work.", "Giza pyramids Egypt plateau archaeological panorama", "Grounded final panorama of the Giza pyramids and plateau in warm natural light."),
+    ("Merer's diary preserves a supply record.", "Giza pyramids Egypt Merer diary shipment record", "Archival documentary detail of the surviving Merer diary display, without fabricated readable writing."),
+    ("Nearby remains reveal daily support work.", "Giza pyramids Egypt workers settlement daily life ruins", "Archaeological documentation of settlement remains near Giza, framed as evidence of organized site support."),
+    ("Some construction steps remain unresolved.", "Giza pyramids Egypt construction method evidence blocks", "Measured documentary view of pyramid masonry, emphasizing that the exact construction sequence is unresolved."),
+    ("Evidence narrows the room for guesswork.", "Giza pyramids Egypt archaeological evidence plateau survey", "Careful archaeological survey of the Giza plateau, grounded and free of sensational claims."),
 ]
 
 
@@ -99,6 +107,7 @@ def giza_demo_script(topic: str, language: str, scene_count: int) -> dict[str, A
             "visual_anchor": "Giza pyramids Egypt",
             "visual_keywords": query,
             "image_prompt": prompt,
+            "visual_type": "ai_image",
         }
         for index, (narration, query, prompt) in enumerate(rows[:scene_count])
     ]
@@ -110,5 +119,5 @@ def giza_demo_script(topic: str, language: str, scene_count: int) -> dict[str, A
         "scenes": scenes,
         "fact_sources": fact_sources_for_topic(topic),
         "demo": True,
-        "model": "curated-giza-demo-16-scenes",
+        "model": f"curated-giza-demo-{len(scenes)}-scenes",
     }
