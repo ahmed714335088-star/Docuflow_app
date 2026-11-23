@@ -1,8 +1,12 @@
 """Fetch relevant visual assets from Pixabay or reusable Wikimedia Commons files."""
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import io
+import json
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +14,12 @@ import httpx
 from PIL import Image, ImageOps
 
 from app.visual_matching import choose_commons_page, rank_pixabay_hits, search_tokens
+
+_PIXABAY_CACHE_TTL = 24 * 60 * 60
+_PIXABAY_MIN_REQUEST_GAP = 0.72
+_PIXABAY_CACHE_DIR = Path(__file__).resolve().parents[1] / "data" / "cache" / "pixabay"
+_pixabay_rate_lock = asyncio.Lock()
+_pixabay_next_request_at = 0.0
 
 
 def _clean_query(value: str, limit: int = 140) -> str:
@@ -27,6 +37,25 @@ def _anchored_query(query: str, visual_anchor: str) -> str:
     return scene[:180]
 
 
+def _pixabay_search_query(query: str, visual_anchor: str) -> str:
+    """Reduce detailed scene terms to exactly two concrete English search terms."""
+    anchored = _anchored_query(query, visual_anchor)
+    words = re.findall(r"[a-z0-9]+", anchored.lower())
+    anchor_words = re.findall(r"[a-z0-9]+", _clean_query(visual_anchor, 80).lower())
+    anchor_set = set(anchor_words)
+    scene_words = list(dict.fromkeys(word for word in words if word not in anchor_set and len(word) > 1))
+    if len(scene_words) >= 2:
+        return " ".join(scene_words[:2])
+    if len(scene_words) == 1:
+        anchor_candidates = [word for word in anchor_words if word != scene_words[0]]
+        if anchor_candidates:
+            return f"{anchor_candidates[-1]} {scene_words[0]}"
+    candidates = list(dict.fromkeys(words))
+    if len(candidates) < 2:
+        raise ValueError("يحتاج بحث Pixabay إلى كلمتين إنجليزيتين واضحتين على الأقل.")
+    return " ".join(candidates[:2])
+
+
 def _hit_identity(hit: dict[str, Any], url: str) -> str:
     return str(hit.get("id") or hit.get("pageURL") or url).strip()
 
@@ -36,6 +65,60 @@ def _pixabay_hits(payload: Any) -> list[dict[str, Any]]:
         return []
     hits = payload.get("hits")
     return [hit for hit in hits if isinstance(hit, dict)] if isinstance(hits, list) else []
+
+
+async def _pace_pixabay_request() -> None:
+    global _pixabay_next_request_at
+    async with _pixabay_rate_lock:
+        delay = _pixabay_next_request_at - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+        _pixabay_next_request_at = time.monotonic() + _PIXABAY_MIN_REQUEST_GAP
+
+
+async def _pixabay_search(client: httpx.AsyncClient, endpoint: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """Search Pixabay with a 24-hour result cache and API-key rate pacing."""
+    key_fingerprint = hashlib.sha256(str(params.get("key", "")).encode("utf-8")).hexdigest()
+    cache_identity = {
+        "endpoint": endpoint,
+        "key": key_fingerprint,
+        "params": {name: value for name, value in params.items() if name != "key"},
+    }
+    cache_name = hashlib.sha256(json.dumps(cache_identity, sort_keys=True).encode("utf-8")).hexdigest() + ".json"
+    cache_path = _PIXABAY_CACHE_DIR / cache_name
+    now = time.time()
+    try:
+        cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        if now - float(cached.get("cached_at", 0)) < _PIXABAY_CACHE_TTL:
+            return _pixabay_hits({"hits": cached.get("hits", [])})
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+
+    await _pace_pixabay_request()
+    try:
+        response = await client.get(endpoint, params=params)
+    except httpx.HTTPError as exc:
+        raise RuntimeError("تعذر الاتصال بـPixabay؛ تحقق من المفتاح والإنترنت.") from exc
+    if response.status_code in (401, 403):
+        raise RuntimeError("رفض Pixabay المفتاح. راجع مفتاح API في الإعدادات.")
+    if response.status_code == 429:
+        reset = str(response.headers.get("X-RateLimit-Reset", "")).strip()
+        wait = f" انتظر {reset} ثانية تقريباً." if reset.isdigit() else " انتظر حتى تجدد الحد ثم أعد المحاولة."
+        raise RuntimeError("بلغ مفتاح Pixabay حد الطلبات (HTTP 429)." + wait)
+    if response.status_code >= 400:
+        raise RuntimeError(f"رفض Pixabay البحث (HTTP {response.status_code}).")
+    try:
+        hits = _pixabay_hits(response.json())
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError("تعذر قراءة استجابة Pixabay.") from exc
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = cache_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"cached_at": now, "hits": hits}), encoding="utf-8")
+        temporary.replace(cache_path)
+    except OSError:
+        pass
+    return hits
 
 
 def _selected_video_variant(hit: dict[str, Any], portrait: bool, max_size: int) -> tuple[str, int] | None:
@@ -77,11 +160,12 @@ async def fetch_pixabay_video(
     """Download the best metadata-matched, unused Pixabay video, or return None."""
     if not key.strip():
         return None
-    query = _anchored_query(query, visual_anchor)
+    detailed_query = _anchored_query(query, visual_anchor)
+    search_query = _pixabay_search_query(detailed_query, visual_anchor)
     portrait = orientation == "portrait"
     params = {
         "key": key.strip(),
-        "q": query,
+        "q": search_query,
         "per_page": 30,
         "video_type": "film",
         "safesearch": "true",
@@ -92,19 +176,8 @@ async def fetch_pixabay_video(
     max_size = 90 * 1024 * 1024
     timeout = httpx.Timeout(60.0, connect=15.0)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        try:
-            response = await client.get("https://pixabay.com/api/videos/", params=params)
-        except httpx.HTTPError as exc:
-            raise RuntimeError("تعذر الاتصال بـPixabay؛ تحقق من المفتاح والإنترنت.") from exc
-        if response.status_code in (401, 403):
-            raise RuntimeError("رفض Pixabay المفتاح. راجع مفتاح API في الإعدادات.")
-        if response.status_code >= 400:
-            raise RuntimeError(f"رفض Pixabay البحث (HTTP {response.status_code}).")
-        try:
-            hits = _pixabay_hits(response.json())
-        except (ValueError, TypeError) as exc:
-            raise RuntimeError("تعذر قراءة استجابة Pixabay.") from exc
-        candidates = rank_pixabay_hits(hits, query, visual_anchor, used_ids, strict_tags=True)
+        hits = await _pixabay_search(client, "https://pixabay.com/api/videos/", params)
+        candidates = rank_pixabay_hits(hits, detailed_query, visual_anchor, used_ids, strict_tags=True)
         for hit in candidates:
             choice = _selected_video_variant(hit, portrait, max_size)
             if not choice:
@@ -161,11 +234,12 @@ async def fetch_pixabay_image(
     """Download a metadata-matched, unused Pixabay still for Ken-Burns motion."""
     if not key.strip():
         return None
-    query = _anchored_query(query, visual_anchor)
+    detailed_query = _anchored_query(query, visual_anchor)
+    search_query = _pixabay_search_query(detailed_query, visual_anchor)
     portrait = orientation == "portrait"
     params = {
         "key": key.strip(),
-        "q": query,
+        "q": search_query,
         "image_type": "photo",
         "orientation": "vertical" if portrait else "horizontal",
         "safesearch": "true",
@@ -175,20 +249,9 @@ async def fetch_pixabay_image(
         "min_height": 1280 if portrait else 720,
     }
     async with httpx.AsyncClient(timeout=httpx.Timeout(55.0, connect=15.0), follow_redirects=True) as client:
-        try:
-            response = await client.get("https://pixabay.com/api/", params=params)
-        except httpx.HTTPError as exc:
-            raise RuntimeError("تعذر الاتصال بـPixabay للبحث عن الصور.") from exc
-        if response.status_code in (401, 403):
-            raise RuntimeError("رفض Pixabay المفتاح. راجع مفتاح API في الإعدادات.")
-        if response.status_code >= 400:
-            raise RuntimeError(f"رفض Pixabay بحث الصور (HTTP {response.status_code}).")
-        try:
-            hits = _pixabay_hits(response.json())
-        except (ValueError, TypeError) as exc:
-            raise RuntimeError("تعذر قراءة استجابة صور Pixabay.") from exc
-        for hit in rank_pixabay_hits(hits, query, visual_anchor, used_ids):
-            image_url = str(hit.get("largeImageURL") or hit.get("webformatURL") or "")
+        hits = await _pixabay_search(client, "https://pixabay.com/api/", params)
+        for hit in rank_pixabay_hits(hits, detailed_query, visual_anchor, used_ids, strict_tags=True):
+            image_url = str(hit.get("fullHDURL") or hit.get("largeImageURL") or "")
             width = int(hit.get("imageWidth", 0) or 0)
             height = int(hit.get("imageHeight", 0) or 0)
             if not image_url.startswith("https://") or width < 720 or height < 720:

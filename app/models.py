@@ -8,7 +8,6 @@ class ApiKeys(BaseModel):
     gemini: str = ""
     claude: str = ""
     pixabay: str = ""
-    pollinations: str = ""
 
 
 class GenerateRequest(BaseModel):
@@ -18,9 +17,8 @@ class GenerateRequest(BaseModel):
     video_language: Literal["en", "ar"] = "en"
     voice: str = "en-US-ChristopherNeural"
     voice_rate: int = Field(default=-12, ge=-25, le=10)
-    provider: Literal["demo", "groq", "gemini", "claude", "pollinations"] = "demo"
+    provider: Literal["demo", "groq", "gemini", "claude"] = "demo"
     allow_gemini_images: bool = False
-    allow_pollinations: bool = False
     keys: ApiKeys = Field(default_factory=ApiKeys)
     whisper_model: Literal["tiny", "base", "small"] = "tiny"
     background_music: bool = True

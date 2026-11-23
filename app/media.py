@@ -20,15 +20,26 @@ def _run(command: list[str]) -> None:
 
 
 async def make_voiceover(text: str, voice: str, destination: Path, rate: int = -12) -> None:
+    import asyncio
     import edge_tts
 
     if not -25 <= rate <= 10:
         raise ValueError("سرعة الراوي يجب أن تكون بين ‎-25% و‎+10%.")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        await edge_tts.Communicate(text=text, voice=voice, rate=f"{rate:+d}%", pitch="-3Hz").save(str(destination))
-    except Exception as exc:
-        raise RuntimeError("تعذر إنشاء التعليق الصوتي عبر edge-tts. تحقق من اتصال الإنترنت واختيار الصوت.") from exc
+    last_error: Exception | None = None
+    for attempt in range(3):
+        destination.unlink(missing_ok=True)
+        try:
+            await edge_tts.Communicate(text=text, voice=voice, rate=f"{rate:+d}%", pitch="-3Hz").save(str(destination))
+            if destination.is_file() and destination.stat().st_size > 0:
+                return
+            raise RuntimeError("استجابة Edge TTS لم تتضمن ملفاً صوتياً صالحاً.")
+        except Exception as exc:
+            last_error = exc
+            destination.unlink(missing_ok=True)
+            if attempt < 2:
+                await asyncio.sleep(0.6 * (attempt + 1))
+    raise RuntimeError("تعذر إنشاء التعليق الصوتي عبر edge-tts بعد 3 محاولات. تحقق من اتصال الإنترنت واختيار الصوت.") from last_error
 
 
 def audio_duration(path: Path) -> float:
@@ -334,14 +345,17 @@ def render_video(
             voice = AudioFileClip(str(audio_path))
             source_clips.append(video)
             voice_sources.append(voice)
-            layer = video.with_start(cursor)
+            # Begin each incoming picture during the tail of the previous 0.4s
+            # silent pause; narration itself still starts on the exact scene boundary.
+            visual_start = cursor if index == 0 else max(0.0, cursor - fade)
+            layer = video.with_start(visual_start)
             if index > 0:
                 layer = layer.with_effects([CrossFadeIn(min(fade, max(0.08, video.duration / 5)))])
             layers.append(layer)
             voice_clips.append(voice.with_start(cursor))
             interval = scene_durations[index] if scene_durations and index < len(scene_durations) else video.duration
             cursor += float(interval)
-        final_duration = cursor + fade
+        final_duration = cursor
         final_video = CompositeVideoClip(layers, size=(width, height), bg_color=(0, 0, 0)).with_duration(final_duration)
         if music_path and music_path.is_file():
             music_clip = AudioFileClip(str(music_path)).with_duration(final_duration).with_volume_scaled(0.10)

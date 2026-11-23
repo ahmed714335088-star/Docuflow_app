@@ -9,11 +9,13 @@ import httpx
 
 from app.models import ApiKeys, GenerateRequest
 from app.media import make_voiceover
-from app.pipeline import _scene_count_for_duration
+from app.pipeline import VOICE_PAUSE_SECONDS, _scene_count_for_duration, _scene_duration_for_audio
 from app.providers import (
     _discover_claude_sonnet_models,
+    _extract_json_payload,
     _extract_gemini_image,
     _generate_claude,
+    _generate_gemini,
     _gemini_image_ids,
     _parse_json,
     _prompt,
@@ -31,11 +33,16 @@ class ProviderRoutingTests(unittest.TestCase):
             requested_seconds = minutes * 60
             scene_count = _scene_count_for_duration(requested_seconds)
             interval = (requested_seconds - 0.22) / scene_count
-            speech_budget = interval - 0.5
+            speech_budget = interval - VOICE_PAUSE_SECONDS
             self.assertEqual(scene_count, expected_count)
             self.assertAlmostEqual(scene_count * interval + 0.22, requested_seconds, places=8)
             self.assertGreaterEqual(speech_budget, 2.5)
-            self.assertAlmostEqual(interval - speech_budget, 0.5, places=8)
+            self.assertAlmostEqual(interval - speech_budget, 0.4, places=8)
+
+    def test_long_voiceover_extends_scene_without_fixed_speech_budget(self) -> None:
+        for speech_seconds in (2.65, 4.2, 12.0):
+            self.assertAlmostEqual(_scene_duration_for_audio(speech_seconds), speech_seconds + 0.4)
+        self.assertEqual(VOICE_PAUSE_SECONDS, 0.4)
 
     def test_giza_demo_has_enough_curated_scenes_for_one_minute(self) -> None:
         script = demo_script("Giza Egypt pyramids", "ar", 19)
@@ -65,7 +72,8 @@ class ProviderRoutingTests(unittest.TestCase):
 
         exact_duration_prompt = _strict_prompt("Bermuda", "en", "16:9", 19, 60)
         self.assertIn("about 60 seconds long", exact_duration_prompt)
-        self.assertIn("2.6 seconds", exact_duration_prompt)
+        self.assertIn("0.4 second pause", exact_duration_prompt)
+        self.assertNotIn("2.6 seconds", exact_duration_prompt)
 
     def test_parser_requires_known_visual_type_per_scene(self) -> None:
         payload = {
@@ -85,6 +93,49 @@ class ProviderRoutingTests(unittest.TestCase):
         payload["scenes"][0]["visual_type"] = "generic_broll"
         with self.assertRaises(ValueError):
             _parse_json(json.dumps(payload), "en", "16:9", 1)
+
+    def test_json_extractor_accepts_fences_and_surrounding_text(self) -> None:
+        payload = {"title": "A brace } in text", "scenes": []}
+        extracted = _extract_json_payload("Result follows:\n```json\n" + __import__("json").dumps(payload) + "\n```\nDone.")
+        self.assertEqual(extracted, payload)
+
+    def test_gemini_uses_json_mime_and_retries_malformed_scene_json(self) -> None:
+        import json
+        valid_payload = {
+            "title": "Bermuda",
+            "visual_anchor": "Bermuda Triangle",
+            "scenes": [{
+                "narration": "Ships crossed dangerous waters.",
+                "translation_ar": "عبرت السفن مياهاً خطرة.",
+                "visual_type": "stock_video",
+                "visual_keywords": "Bermuda Triangle cargo ship",
+                "image_prompt": "Bermuda Triangle cargo ship crossing rough water",
+            }],
+        }
+
+        class Response:
+            status_code = 200
+            def __init__(self, body): self.body = body
+            def json(self): return self.body
+
+        class Client:
+            requests = []
+            async def get(self, *_args, **_kwargs):
+                return Response({"models": [{"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]}]})
+            async def post(self, *_args, **kwargs):
+                type(self).requests.append(kwargs["json"])
+                if len(type(self).requests) == 1:
+                    text = "Not valid JSON: ```json\n{ broken }\n```"
+                else:
+                    text = "Here is the result:\n```json\n" + json.dumps(valid_payload) + "\n```\nDone."
+                return Response({"candidates": [{"content": {"parts": [{"text": text}]}}]})
+
+        Client.requests = []
+        result = asyncio.run(_generate_gemini(cast(httpx.AsyncClient, Client()), "strict prompt", "test-key", "en", "16:9", 1))
+        self.assertEqual(result["model"], "gemini-2.5-flash")
+        self.assertEqual(len(Client.requests), 2)
+        self.assertEqual(Client.requests[0]["generationConfig"]["responseMimeType"], "application/json")
+        self.assertIn("JSON RETRY", Client.requests[1]["contents"][0]["parts"][0]["text"])
 
     def test_gemini_image_models_require_generate_content_and_image_name(self) -> None:
         payload = {"models": [

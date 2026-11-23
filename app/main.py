@@ -77,12 +77,6 @@ async def start_generation(request: GenerateRequest) -> dict[str, str]:
         raise HTTPException(status_code=422, detail="أدخل Claude API Key قبل اختيار هذا المزود.")
     if request.allow_gemini_images and not request.keys.gemini.strip():
         raise HTTPException(status_code=422, detail="توليد صور Gemini يحتاج مفتاح Gemini صالحاً.")
-    if request.provider == "pollinations" and not request.keys.pollinations.strip():
-        raise HTTPException(status_code=422, detail="أدخل Pollinations API Key قبل اختيار موفر النص هذا.")
-    if request.provider == "pollinations" and not request.allow_pollinations:
-        raise HTTPException(status_code=422, detail="فعّل موافقة Pollinations قبل استخدام الخدمة.")
-    if request.allow_pollinations and not request.keys.pollinations.strip():
-        raise HTTPException(status_code=422, detail="توليد الصور الاحتياطية عبر Pollinations يحتاج مفتاح API.")
 
     job_id = uuid.uuid4().hex[:12]
     jobs[job_id] = {

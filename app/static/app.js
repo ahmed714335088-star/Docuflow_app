@@ -2,7 +2,7 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const stageOrder = ["script", "voice", "visuals", "subtitles", "render"];
-  const keyIds = ["groq-key", "gemini-key", "claude-key", "pixabay-key", "pollinations-key"];
+  const keyIds = ["groq-key", "gemini-key", "claude-key", "pixabay-key"];
   let aspectRatio = "16:9";
   let toastTimer;
 
@@ -16,7 +16,7 @@
   }
 
   function keysFromInputs() {
-    return { groq: $("#groq-key").value.trim(), gemini: $("#gemini-key").value.trim(), claude: $("#claude-key").value.trim(), pixabay: $("#pixabay-key").value.trim(), pollinations: $("#pollinations-key").value.trim() };
+    return { groq: $("#groq-key").value.trim(), gemini: $("#gemini-key").value.trim(), claude: $("#claude-key").value.trim(), pixabay: $("#pixabay-key").value.trim() };
   }
 
   function updateVoiceOptions(preferredVoice = "") {
@@ -59,15 +59,15 @@
   function loadSettings() {
     try {
       const values = JSON.parse(localStorage.getItem("docuflow.keys.v1") || "{}");
-      if (Object.hasOwn(values, "pexels")) {
+      if (Object.hasOwn(values, "pexels") || Object.hasOwn(values, "pollinations")) {
         delete values.pexels;
+        delete values.pollinations;
         localStorage.setItem("docuflow.keys.v1", JSON.stringify(values));
       }
       $("#groq-key").value = values.groq || "";
       $("#gemini-key").value = values.gemini || "";
       $("#claude-key").value = values.claude || "";
       $("#pixabay-key").value = values.pixabay || "";
-      $("#pollinations-key").value = values.pollinations || "";
       if (values.provider) {
         const radio = $(`input[name="provider"][value="${values.provider}"]`);
         if (radio) radio.checked = true;
@@ -106,18 +106,14 @@
     const minutes = Number($("#duration-minutes").value || 1);
     const keys = keysFromInputs();
     const visuals = keys.pixabay
-      ? "سيقبل مقاطع Pixabay التي تطابق الوسوم فقط؛ وإذا غاب المقطع المطابق يستخدم صورة Gemini بعد الموافقة، لا صورة Pixabay أو لقطة عامة."
-      : "تحتاج ai_image مفتاح Gemini وموافقة الصور؛ ويحتاج stock_video مقطع Pixabay مطابقاً أو صورة Gemini مولدة بديلاً بعد الموافقة. لا تُستخدم لقطات عامة.";
+      ? "يُبحث عن فيديو Pixabay بعبارة إنجليزية بسيطة من كلمتين وتُفحص وسومه؛ عند غياب الفيديو ينتقل تلقائياً إلى Pixabay Photos عالي الدقة مع حركة Ken Burns."
+      : "أضف مفتاح Pixabay لجلب فيديوهات وصور Photos عالية الدقة؛ عند غياب الفيديو المطابق تُستخدم صورة Pixabay مع Ken Burns، ولا تُقبل لقطات عامة.";
     if (provider === "demo") note.lastElementChild.textContent = minutes > 1
-      ? `وضع العينة يدعم دقيقة واحدة فقط؛ اختر Groq أو Gemini أو Claude أو Pollinations لفيديو ${minutes} دقائق. ${visuals}`
-      : `وضع العينة يستخدم سيناريو موثقاً لأهرامات الجيزة فقط، لكنه يحتاج موافقة ومفتاح Gemini للمشاهد المصنفة ai_image. لبقية الموضوعات اختر مزود نص. ${visuals}`;
+      ? `وضع العينة يدعم دقيقة واحدة فقط؛ اختر Groq أو Gemini أو Claude لفيديو ${minutes} دقائق. ${visuals}`
+      : `وضع العينة يستخدم سيناريو موثقاً لأهرامات الجيزة فقط. يمكن توليد صور Gemini عند تفعيل الخيار، أو استخدام Pixabay Photos تلقائياً. لبقية الموضوعات اختر مزود نص. ${visuals}`;
     if (provider === "groq") note.lastElementChild.textContent = keys.groq ? `سيُنشأ السيناريو باللغة ${language} عبر Groq. ${visuals}` : "أضف مفتاح Groq من صفحة الإعدادات قبل البدء. الخلفيات العامة غير مقبولة بديلاً.";
-    if (provider === "gemini") note.lastElementChild.textContent = keys.gemini ? `سيقرأ التطبيق models.list من Google، ثم يختار نموذج generateContent نشطاً ويجرب البديل عند تعذره. ${visuals}` : "أضف مفتاح Gemini من صفحة الإعدادات قبل البدء؛ يكتشف التطبيق النماذج النشطة بدلاً من اسم ثابت.";
+    if (provider === "gemini") note.lastElementChild.textContent = keys.gemini ? `سيقرأ التطبيق models.list من Google، ثم يختار نموذج generateContent نشطاً ويرسل طلب النص بوضع JSON مع إعادة محاولة التحليل. ${visuals}` : "أضف مفتاح Gemini من صفحة الإعدادات قبل البدء؛ يكتشف التطبيق النماذج النشطة بدلاً من اسم ثابت.";
     if (provider === "claude") note.lastElementChild.textContent = keys.claude ? `سيكتشف التطبيق نموذج Claude Sonnet المتاح عبر Anthropic API. قد تترتب تكلفة أو تُستهلك الحصة؛ راجع تنبيه الإعدادات. ${visuals}` : "أضف Claude API Key من صفحة الإعدادات. قد تترتب تكلفة أو تُستهلك حصة Anthropic API.";
-    if (provider === "pollinations") note.lastElementChild.textContent = keys.pollinations ? `سيستخدم كتالوج Pollinations الحالي للنص. يتطلب المفتاح وقد يستهلك Pollen؛ فعّل مربع الموافقة لكل تشغيل. ${visuals}` : "أضف Pollinations API Key من الإعدادات؛ الخدمة تتطلب مفتاحاً وقد تستهلك Pollen، وليست keyless حالياً.";
-    const consent = $("#pollinations-consent");
-    consent.classList.toggle("is-confirmed", $("#allow-pollinations").checked);
-    consent.classList.toggle("is-required", provider === "pollinations" || $("#allow-pollinations").checked);
     const geminiConsent = $("#gemini-consent");
     geminiConsent.classList.toggle("is-confirmed", $("#allow-gemini-images").checked);
     geminiConsent.classList.toggle("is-required", $("#allow-gemini-images").checked);
@@ -237,11 +233,6 @@
     if (provider === "claude" && !$("#claude-key").value.trim()) { navigate("settings"); toast("أضف Claude API Key أولاً.", true); return; }
     const allowGeminiImages = $("#allow-gemini-images").checked;
     if (allowGeminiImages && !$("#gemini-key").value.trim()) { navigate("settings"); toast("موافقة توليد الصور تتطلب مفتاح Gemini صالحاً.", true); return; }
-    const allowPollinations = $("#allow-pollinations").checked;
-    const pollinationsKey = $("#pollinations-key").value.trim();
-    if (provider === "pollinations" && !pollinationsKey) { navigate("settings"); toast("أضف Pollinations API Key أولاً.", true); return; }
-    if (provider === "pollinations" && !allowPollinations) { toast("فعّل مربع موافقة Pollinations لتأكيد احتمال استهلاك رصيد Pollen.", true); return; }
-    if (allowPollinations && !pollinationsKey) { navigate("settings"); toast("أضف Pollinations API Key أو ألغِ موافقة توليد الصور.", true); return; }
     const button = $("#generate-button");
     button.disabled = true;
     button.querySelector("span:nth-child(2)").textContent = "جارٍ تجهيز خط الإنتاج…";
@@ -261,7 +252,6 @@
           voice_rate: Number($("#voice-rate").value),
           provider,
           allow_gemini_images: allowGeminiImages,
-          allow_pollinations: allowPollinations,
           keys: keysFromInputs(),
           whisper_model: "tiny",
           background_music: true,
@@ -269,7 +259,6 @@
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "تعذر بدء الإنتاج.");
-      if (allowPollinations) $("#allow-pollinations").checked = false;
       if (allowGeminiImages) $("#allow-gemini-images").checked = false;
       updateProviderHint();
       $("#progress-message").textContent = "بدأ خط الإنتاج — جارٍ إعداد السيناريو.";
@@ -318,19 +307,6 @@
   $$(".nav-item").forEach(item => item.addEventListener("click", () => navigate(item.dataset.view)));
   $("#settings-shortcut").addEventListener("click", () => navigate("settings"));
   $("#generate-button").addEventListener("click", generate);
-  $("#pollinations-backup-button").addEventListener("click", () => {
-    const radio = $('input[name="provider"][value="pollinations"]');
-    radio.checked = true;
-    updateProviderHint();
-    saveSettings(false);
-    if (!keysFromInputs().pollinations) {
-      navigate("settings");
-      toast("أضف Pollinations API Key أولاً؛ التوليد يتطلب مفتاحاً ورصيداً.", true);
-    } else if (!$("#allow-pollinations").checked) {
-      $("#pollinations-consent").scrollIntoView({ behavior: "smooth", block: "center" });
-      toast("راجع التنبيه ثم وافق صراحةً إذا أردت استخدام Pollinations.");
-    }
-  });
   $("#show-history").addEventListener("click", () => navigate("history"));
   $$('[data-open-studio]').forEach(button => button.addEventListener("click", () => navigate("studio")));
   $$(".ratio-option").forEach(button => button.addEventListener("click", () => {
@@ -350,13 +326,11 @@
     saveSettings(false);
   });
   $("#voice").addEventListener("change", () => saveSettings(false));
-  $("#allow-pollinations").addEventListener("change", updateProviderHint);
   $("#allow-gemini-images").addEventListener("change", updateProviderHint);
   $("#voice-rate").addEventListener("input", () => { updateVoiceRateLabel(); saveSettings(false); });
   $("#save-settings").addEventListener("click", () => saveSettings(true));
   $("#clear-settings").addEventListener("click", () => {
     keyIds.forEach(id => { $(`#${id}`).value = ""; });
-    $("#allow-pollinations").checked = false;
     saveSettings(false);
     updateProviderHint();
     $("#settings-feedback").textContent = "مُسحت المفاتيح المحفوظة.";

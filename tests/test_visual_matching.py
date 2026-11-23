@@ -7,6 +7,7 @@ from app.visual_matching import (
     rank_pixabay_hits,
     visual_relevance_score,
 )
+from app.visual_sources import _pixabay_search_query
 
 
 class VisualMatchingTests(unittest.TestCase):
@@ -35,6 +36,11 @@ class VisualMatchingTests(unittest.TestCase):
         ]
         self.assertEqual(rank_pixabay_hits(hits, self.query, self.anchor), [])
         self.assertIsNone(visual_relevance_score("Egypt Giza pyramid sunset desert", self.anchor, self.query))
+
+    def test_pixabay_api_query_is_two_words_and_keeps_scene_detail_for_tag_validation(self) -> None:
+        query = "Bermuda Triangle cargo ship storm Atlantic night"
+        self.assertEqual(_pixabay_search_query(query, "Bermuda Triangle"), "cargo ship")
+        self.assertEqual(_pixabay_search_query("ocean waves", "ocean waves"), "ocean waves")
 
     def test_repeated_subject_term_in_scene_query_is_retained(self) -> None:
         query = "Giza pyramids Egypt Great Pyramid plateau overview"
