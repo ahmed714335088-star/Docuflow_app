@@ -45,7 +45,7 @@
 
         <div class="workspace-layout">
           <section class="editor-column" aria-label="إعداد الفيديو">
-            <div class="panel-heading"><div><span class="section-index">01 / الفكرة</span><h2>ما الحكاية التي سنرويها؟</h2></div><span class="duration-chip" id="scene-duration-chip">19 مشهداً <i></i> 3.15 ث للمشهد · صمت 0.5 ث</span></div>
+            <div class="panel-heading"><div><span class="section-index">01 / الفكرة</span><h2>ما الحكاية التي سنرويها؟</h2></div><span class="duration-chip" id="scene-duration-chip">مشاهد طبيعية <i></i> 3–7 ث للمشهد</span></div>
             <label class="field-label" for="topics">الموضوع <span>موضوع واحد في كل سطر للأتمتة الدفعية</span></label>
             <div class="textarea-wrap"><textarea id="topics" maxlength="3000" rows="5" placeholder="مثال: أسرار أعماق المحيط&#10;ماذا يحدث لو اختفت الشمس؟" spellcheck="false"></textarea><div class="textarea-foot"><span>اكتب موضوعاً واضحاً أو عدة موضوعات</span><span id="topic-count">0 / 8</span></div></div>
 
@@ -64,7 +64,7 @@
             <div class="provider-row"><div><span class="field-label">محرك كتابة النص</span><p>اكتشف Gemini وClaude النماذج النشطة أو اختر مزوداً آخر.</p></div><div class="provider-select"><label><input type="radio" name="provider" value="demo" checked><span>تجريبي</span></label><label><input type="radio" name="provider" value="groq"><span>Groq</span></label><label><input type="radio" name="provider" value="gemini"><span>Gemini</span></label><label><input type="radio" name="provider" value="claude"><span>Claude</span></label></div></div>
             <div class="inline-warning" id="provider-hint"><span>i</span><span>تُستخدم فيديوهات Pixabay المطابقة أولاً، ثم صور Pixabay عالية الدقة مع حركة Ken Burns عند غياب فيديو مناسب. لا تُقبل المرئيات العامة.</span></div>
             <div class="pollinations-consent" id="gemini-consent"><label for="allow-gemini-images"><input id="allow-gemini-images" type="checkbox"><span><strong>السماح بصور المشاهد المولدة عبر Gemini</strong><small>قد يستهلك طلبات أو حصة Gemini. مطلوب لمشاهد ai_image وبديل لقطات Pixabay المرفوضة. استخدم مفتاح Gemini صالحاً؛ لن يُدّعى توليد صور عند غياب المفتاح.</small></span></label></div>
-            <div class="editor-actions"><button class="primary-button" id="generate-button"><span class="button-orbit">✳</span><span>ابدأ إنتاج الفيديو</span><span class="button-arrow">←</span></button><span class="action-note" id="duration-note">19 مشهداً · دقيقة واحدة · حتى 8 موضوعات</span></div>
+            <div class="editor-actions"><button class="primary-button" id="generate-button"><span class="button-orbit">✳</span><span>ابدأ إنتاج الفيديو</span><span class="button-arrow">←</span></button><span class="action-note" id="duration-note">دقيقة واحدة · يحدد السيناريو عدد المشاهد · حتى 8 موضوعات</span></div>
           </section>
 
           <aside class="right-column">

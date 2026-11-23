@@ -139,7 +139,7 @@ def _extract_json_payload(text: str) -> dict[str, Any]:
     raise ValueError("لم تُرجع خدمة النص كائن JSON صالحاً.")
 
 
-def _parse_json(text: str, video_language: str = "en", ratio: str = "16:9", scene_count: int = 12) -> dict[str, Any]:
+def _parse_json(text: str, video_language: str = "en", ratio: str = "16:9", scene_count: int | None = None) -> dict[str, Any]:
     payload = _extract_json_payload(text)
     raw_scenes = payload.get("scenes")
     if not isinstance(raw_scenes, list) or not raw_scenes:
@@ -150,7 +150,7 @@ def _parse_json(text: str, video_language: str = "en", ratio: str = "16:9", scen
     if not anchor_tokens:
         raise ValueError("لم تُرجع خدمة النص مرساة بصرية إنجليزية محددة لموضوع الفيلم.")
     normalized: list[dict[str, str]] = []
-    for scene in raw_scenes[:scene_count]:
+    for scene in (raw_scenes[:scene_count] if scene_count is not None else raw_scenes):
         if not isinstance(scene, dict):
             continue
         narration = str(scene.get("narration") or scene.get("narration_en") or "").strip()
@@ -183,8 +183,8 @@ def _parse_json(text: str, video_language: str = "en", ratio: str = "16:9", scen
             })
     if not normalized:
         raise ValueError("تعذر العثور على مشاهد صالحة في استجابة الخدمة.")
-    if len(normalized) != scene_count:
-        raise ValueError(f"أعاد مزود النص {len(normalized)} مشهداً، بينما تتطلب المدة {scene_count} مشهداً. أعد المحاولة.")
+    if scene_count is not None and len(normalized) != scene_count:
+        raise ValueError(f"أعاد مزود النص {len(normalized)} مشهداً، بينما كان المتوقع {scene_count}. أعد المحاولة.")
     default_title = "فيلم وثائقي قصير" if video_language == "ar" else "Documentary short"
     return {
         "title": str(payload.get("title") or default_title).strip()[:160],
@@ -200,37 +200,37 @@ def _prompt(
     requested_seconds: int | None = None,
 ) -> str:
     frame = "9:16 vertical" if ratio == "9:16" else "16:9 horizontal"
-    target_seconds = requested_seconds if requested_seconds is not None else round(scene_count * 3.08 + 0.22)
+    target_seconds = requested_seconds if requested_seconds is not None else round((scene_count or 15) * 3.08 + 0.22)
     if video_language == "ar":
         return f"""اكتب سيناريو وثائقياً سريعاً وجذاباً عن: {topic!r}، بالعربية الفصحى السليمة والطبيعية، لفيديو {frame} مدته قرابة {target_seconds} ثانية.
 ابدأ بخطاف قوي في أول مشهدين، ثم قدّم سياقاً وأدلة وتحولاً وكشفاً وخاتمة. اجعل كل جملة دقيقة نحوياً وموجزة وسهلة النطق، وتجنب الترجمة الحرفية. ميّز الوقائع الموثقة عن الفرضيات: استخدم صياغة مثل «تشير التقارير التاريخية إلى…» للوقائع المنقولة، و«تطرح بعض الفرضيات…» للنظريات؛ لا تخترع أرقاماً أو مصادر أو أحداثاً، ولا تعرض فرضية على أنها حقيقة.
-أعد بالضبط {scene_count} مشهداً. اجعل narration موجزاً وطبيعياً وبفكرة واحدة، دون حد زمني ثابت؛ سيُمدد المشهد إلى مدة الصوت المقاسة مضافاً إليها وقفة 0.4 ثانية. لا تسرّع الكلام ولا تحذف الكلمات لإجباره على مدة مسبقة. قسّم الحجة مشهداً مشهداً ولا تكرر المعلومة أو الصورة. في visual_keywords اكتب استعلاماً تصويرياً إنجليزياً محدداً، عادة 5–9 كلمات، يصف الشيء والفعل والبيئة في هذا المشهد (مثال: cargo ship storm Atlantic night؛ vintage airplane flying clouds archival؛ compass navigation map closeup؛ underwater methane bubbles seabed). ممنوع الكلمات العامة المفردة مثل fog أو ocean أو mystery. اجعل استعلام كل مشهد مختلفاً عن كل الاستعلامات السابقة. الصورة يجب أن تعرض ما يقوله narration فعلياً لا مجرد جو عام. أضف image_prompt إنجليزياً واقعياً مطابقاً للسرد.
+اختر عدداً طبيعياً من المشاهد يناسب القصة والمدة المستهدفة، عادةً 3–7 ثوانٍ لكل مشهد، ولا تلتزم بعدد ثابت. اجعل narration موجزاً وطبيعياً وبفكرة واحدة، دون حد زمني ثابت؛ سيُمدد المشهد إلى مدة الصوت المقاسة مضافاً إليها وقفة 0.4 ثانية. لا تسرّع الكلام ولا تحذف الكلمات لإجباره على مدة مسبقة. قسّم الحجة مشهداً مشهداً ولا تكرر المعلومة أو الصورة. في visual_keywords اكتب استعلاماً تصويرياً إنجليزياً محدداً، عادة 5–9 كلمات، يصف الشيء والفعل والبيئة في هذا المشهد (مثال: cargo ship storm Atlantic night؛ vintage airplane flying clouds archival؛ compass navigation map closeup؛ underwater methane bubbles seabed). ممنوع الكلمات العامة المفردة مثل fog أو ocean أو mystery. اجعل استعلام كل مشهد مختلفاً عن كل الاستعلامات السابقة. الصورة يجب أن تعرض ما يقوله narration فعلياً لا مجرد جو عام. أضف image_prompt إنجليزياً واقعياً مطابقاً للسرد.
 اختر visual_type بقيمة ai_image للأحداث التاريخية والألغاز والمفاهيم العلمية والفرضيات والسرد الدرامي؛ أو stock_video فقط لفعل واقعي ملموس تلائمه لقطة مخزون مطابقة. لا تختر stock_video للمزاج أو اللقطات العامة. اجعل translation_ar مطابقة للسرد العربي حرفياً. أعد JSON فقط بالشكل: {{"title":"عنوان عربي موجز","hook":"خطاف عربي","visual_anchor":"stable English subject anchor","scenes":[{{"narration":"جملة عربية قصيرة دقيقة","translation_ar":"نفس الجملة","visual_type":"ai_image","visual_keywords":"specific English search query","image_prompt":"context-specific English documentary image prompt"}}]}}. لا تضف Markdown."""
     return f"""Create a factual, fast-paced, highly engaging documentary script about: {topic!r}, for {frame}, about {target_seconds} seconds long.
 Open with a gripping two-scene hook, then build context, evidence, a turn, reveal and payoff. Do not fabricate statistics, sources, quotes, incidents or certainty; clearly distinguish documented facts from hypotheses. Keep every English sentence grammatically natural and fact-aware.
-Return exactly {scene_count} scenes. Keep narration concise and natural without a fixed speech-time cap; the scene expands to measured voice duration plus a 0.4 second silent gap. Never force narration into a preset time window. Every scene needs a distinct factual beat and a different visual. For each scene provide a faithful fluent Arabic translation and a specific 5–9 word ENGLISH Pixabay query naming the subject, action and setting in the narration (e.g. cargo ship storm Atlantic night; vintage airplane flying clouds archival; compass navigation map closeup; underwater methane bubbles seabed). Never use vague one-word queries like fog, ocean, mystery. No repeated query, clip idea, or generic B-roll unrelated to the sentence. Also provide a separate, concrete English image prompt showing the actual described action.
+Choose a natural number of scenes that best fits the story and target runtime, typically 3–7 seconds per scene; do not force a fixed count. Keep narration concise and natural without a fixed speech-time cap; the scene expands to measured voice duration plus a 0.4 second silent gap. Never force narration into a preset time window. Every scene needs a distinct factual beat and a different visual. For each scene provide a faithful fluent Arabic translation and a specific 5–9 word ENGLISH Pixabay query naming the subject, action and setting in the narration (e.g. cargo ship storm Atlantic night; vintage airplane flying clouds archival; compass navigation map closeup; underwater methane bubbles seabed). Never use vague one-word queries like fog, ocean, mystery. No repeated query, clip idea, or generic B-roll unrelated to the sentence. Also provide a separate, concrete English image prompt showing the actual described action.
 Set visual_type to ai_image for historical events, mysteries, scientific concepts, hypotheses and dramatic storytelling; use stock_video only for concrete observable actions that an exact stock clip can show, never for generic B-roll or mood. Return ONLY valid JSON: {{"title":"short title","hook":"hook","visual_anchor":"stable English subject anchor","scenes":[{{"narration":"4-7 spoken English words","translation_ar":"accurate Arabic translation","visual_type":"ai_image","visual_keywords":"specific contextual English search query","image_prompt":"specific documentary visual for this narration"}}]}}. No markdown."""
 
 
 def _strict_prompt(
-    topic: str, video_language: str, ratio: str, scene_count: int, requested_seconds: int | None = None,
+    topic: str, video_language: str, ratio: str, scene_count: int | None = None, requested_seconds: int | None = None,
 ) -> str:
     """Prompt for one coherent, factual story with explicit scene-to-visual anchors."""
     frame = "vertical 9:16" if ratio == "9:16" else "horizontal 16:9"
-    target_seconds = requested_seconds if requested_seconds is not None else round(scene_count * 3.08 + 0.22)
+    target_seconds = requested_seconds if requested_seconds is not None else round((scene_count or 15) * 3.08 + 0.22)
     context = reference_context(topic, video_language)
     if video_language == "ar":
         grounding = f"\n\nحقائق مرجعية مقيدة استخدمها لهذا الموضوع فقط:\n{context}" if context else "\n\nاستخدم الحقائق عالية الثقة فقط. احذف التفاصيل المختلف عليها أو صغها كاحتمال، ولا تخترع رقماً أو اقتباساً أو مرجعاً."
         return f"""اكتب فيلماً وثائقياً عربياً فصيحاً وطبيعياً عن {topic!r}، مدته نحو {target_seconds} ثانية وبصيغة {frame}.
 اكتب قصة متماسكة لا قائمة حقائق: افتتح بسؤال بصري قوي، ثم عرّف الموضوع، وقدم أدلة ومشهداً إنسانياً، وميّز ما لم يُحسم، واختم باستنتاج واضح. استخدم أفعالاً وصوراً ملموسة، وتجنب العبارات الإنشائية والتهويل. لا تختلق إحصاءات أو اقتباسات أو مصادر. ميّز الوقائع عن الفرضيات بعبارات صريحة؛ الفرضية ليست مشهداً حقيقياً.
-أعد بالضبط {scene_count} مشهداً. اجعل narration موجزاً وطبيعياً، لكن لا تحشره في حد زمني ثابت: سيُمدد المشهد تلقائياً إلى مدة الصوت الفعلية مع وقفة 0.4 ثانية. لا تسرّع الجمل ولا تحذف كلمات لإجبارها على مدة مسبقة. الترجمة العربية في translation_ar يجب أن تطابق narration حرفياً.
+اختر عدداً طبيعياً من المشاهد يناسب القصة والمدة، عادةً 3–7 ثوانٍ للمشهد. لا تلتزم بعدد ثابت. اجعل narration موجزاً وطبيعياً، لكن لا تحشره في حد زمني ثابت: سيُمدد المشهد تلقائياً إلى مدة الصوت الفعلية مع وقفة 0.4 ثانية. لا تسرّع الجمل ولا تحذف كلمات لإجبارها على مدة مسبقة. الترجمة العربية في translation_ar يجب أن تطابق narration حرفياً.
 أعد visual_anchor واحداً ثابتاً من كلمتين إلى أربع كلمات باللغة الإنجليزية يحدد الموضوع الدقيق؛ لا تضع فيه المزاج أو نوع الصورة. يجب أن يبدأ كل visual_keywords بهذه المرساة نفسها، ثم يضيف 3–6 كلمات تصف الشيء أو الفعل أو المكان المذكور فعلاً في الجملة. اكتب وصفاً مختلفاً لكل مشهد. لا تستخدم كلمات عامة مثل fog أو ocean أو mystery أو Egypt وحدها، ولا تستخدم لقطة طبيعة أو مدينة لا صلة لها بالنص. لا تدّع أن تطابق الوسوم يثبت ما تعرضه بكسلات الصورة.
 لكل مشهد اختر visual_type واحداً: ai_image للأحداث التاريخية والألغاز والمفاهيم العلمية والفرضيات والسرد الدرامي؛ أو stock_video فقط لفعل واقعي ملموس يمكن لمقطع مخزون مطابق عرضه فعلاً. لا تختر stock_video لمجرد الجو العام. إذا اخترت stock_video فاجعل استعلامه قابلاً للتحقق بوسوم دقيقة. وسم إعادة بناء الفرضية بأنها تصور لا دليل. image_prompt محدد ويطابق المرساة والسرد دون خيال أو كتابة مقروءة.
 أخرج JSON صالحاً فقط بالشكل التالي: {{"title":"عنوان محدد","hook":"خطاف","visual_anchor":"stable English subject anchor","scenes":[{{"narration":"جملة عربية قصيرة","translation_ar":"الجملة نفسها","visual_type":"ai_image","visual_keywords":"same anchor plus concrete scene terms","image_prompt":"specific scene matching narration"}}]}}.{grounding}"""
     grounding = f"\n\nBounded source context for this topic; use only these facts:\n{context}" if context else "\n\nUse high-confidence facts only. Qualify disputed details or omit them; never invent statistics, quotations, incidents or sources."
     return f"""Write a fluent, factual, engaging documentary short about {topic!r}, about {target_seconds} seconds long in {frame}.
 Tell one coherent story, not a list of trivia: open with a concrete visual question, establish the subject, build through evidence and one human/scientific detail, qualify what remains unknown, and end with a clear takeaway. Use vivid but restrained language. Do not invent statistics, quotations, incidents or sources. Clearly distinguish documented records from hypotheses.
-Return exactly {scene_count} scenes. Keep narration concise and natural, but do not target a fixed speech duration: the scene will be extended to the measured voiceover duration plus a 0.4 second pause. Never omit words or force speech into a preset time window. Each scene must add a new beat. Provide fluent accurate Arabic translation in translation_ar.
+Choose the natural number of scenes that best fits the story and target runtime, typically 3–7 seconds per scene; do not target a fixed scene count. Keep narration concise and natural, but do not target a fixed speech duration: the scene will be extended to the measured voiceover duration plus a 0.4 second pause. Never omit words or force speech into a preset time window. Each scene must add a new beat. Provide fluent accurate Arabic translation in translation_ar.
 Return one stable visual_anchor of 2–4 English words naming the exact documentary subject, not a mood. Every visual_keywords query must begin with that exact anchor, followed by 3–6 concrete words describing the visible object, action or place actually named in the narration. Make every scene query distinct. Do not use vague terms such as fog, ocean, mystery or Egypt alone and never substitute unrelated nature/city B-roll. Metadata matching is a relevance filter, not proof of pixel-level content.
 For every scene set visual_type to exactly ai_image or stock_video. Use ai_image for historical events, mysteries, scientific concepts, hypotheses and dramatic storytelling. Use stock_video only for concrete observable real-world actions that matching footage can show, never for mood or generic B-roll. Pixabay tags will be checked and unrelated clips rejected. Label hypothetical reconstructions as conceptual, not evidence. image_prompt must match the subject and action and exclude fantasy or readable fake text.
 Return ONLY valid JSON in this shape: {{"title":"specific title","hook":"hook","visual_anchor":"stable English subject anchor","scenes":[{{"narration":"4–7 spoken English words","translation_ar":"accurate Arabic translation","visual_type":"ai_image","visual_keywords":"same anchor plus concrete scene terms","image_prompt":"specific factual scene matching narration"}}]}}.{grounding}"""
@@ -290,7 +290,7 @@ async def _discover_gemini_models(client: httpx.AsyncClient, api_key: str) -> li
 
 
 async def _generate_gemini(
-    client: httpx.AsyncClient, prompt: str, api_key: str, video_language: str, aspect_ratio: str, scene_count: int
+    client: httpx.AsyncClient, prompt: str, api_key: str, video_language: str, aspect_ratio: str, scene_count: int | None
 ) -> dict[str, Any]:
     models = await _discover_gemini_models(client, api_key)
     if not models:
@@ -313,7 +313,7 @@ async def _generate_gemini(
             if repair_attempt:
                 request_prompt += (
                     "\n\nJSON RETRY: Regenerate the complete response. Return exactly one valid JSON object, "
-                    f"with exactly {scene_count} valid scenes and every required field. Do not add markdown or prose."
+                    "with a natural number of valid scenes fitting the requested runtime. Do not add markdown or prose."
                 )
             try:
                 response = await client.post(
@@ -323,7 +323,7 @@ async def _generate_gemini(
                         "contents": [{"parts": [{"text": request_prompt}]}],
                         "generationConfig": {
                             "temperature": 0.75,
-                            "maxOutputTokens": min(24000, max(4000, scene_count * 150)),
+                            "maxOutputTokens": min(24000, max(4000, (scene_count or 100) * 150)),
                             "responseMimeType": "application/json",
                         },
                     },
@@ -521,7 +521,7 @@ async def _discover_claude_sonnet_models(client: httpx.AsyncClient, api_key: str
 
 
 async def _generate_claude(
-    client: httpx.AsyncClient, prompt: str, api_key: str, video_language: str, aspect_ratio: str, scene_count: int
+    client: httpx.AsyncClient, prompt: str, api_key: str, video_language: str, aspect_ratio: str, scene_count: int | None
 ) -> dict[str, Any]:
     if not api_key.strip():
         raise ValueError("أدخل Claude API Key في الإعدادات أو اختر مزوداً آخر.")
@@ -536,7 +536,7 @@ async def _generate_claude(
                 headers={"x-api-key": api_key.strip(), "anthropic-version": CLAUDE_VERSION, "content-type": "application/json"},
                 json={
                     "model": model_id,
-                    "max_tokens": min(24000, max(4000, scene_count * 150)),
+                    "max_tokens": min(24000, max(4000, (scene_count or 100) * 150)),
                     "temperature": 0.75,
                     "system": "Return only valid JSON matching the user's requested schema. Do not add markdown.",
                     "messages": [{"role": "user", "content": prompt}],
@@ -572,13 +572,14 @@ async def generate_script(
     keys: ApiKeys,
     video_language: str = "en",
     aspect_ratio: str = "16:9",
-    scene_count: int = 15,
+    scene_count: int | None = None,
     requested_seconds: int | None = None,
 ) -> dict[str, Any]:
     if provider == "demo":
-        if scene_count > 20:
+        if (scene_count is not None and scene_count > 20) or (requested_seconds is not None and requested_seconds > 80):
             raise ValueError("وضع التجربة مصمم لمقطع دقيقة واحدة فقط؛ اختر Gemini أو Groq أو Claude للمدد الأطول.")
-        return demo_script(topic, video_language, scene_count)
+        demo_count = scene_count if scene_count is not None else max(1, min(20, round((requested_seconds or 60) / 4)))
+        return demo_script(topic, video_language, demo_count)
     prompt = _strict_prompt(topic, video_language, aspect_ratio, scene_count, requested_seconds)
     fact_sources = fact_sources_for_topic(topic)
     timeout = httpx.Timeout(300.0, connect=30.0)
@@ -593,10 +594,10 @@ async def generate_script(
                     json={
                         "model": GROQ_MODEL,
                         "temperature": 0.75,
-                        "max_tokens": min(24000, max(4000, scene_count * 150)),
+                        "max_tokens": min(24000, max(4000, (scene_count or 100) * 150)),
                         "response_format": {"type": "json_object"},
                         "messages": [
-                            {"role": "system", "content": f"Write accurate, engaging documentary scripts with exactly {scene_count} short scenes in the requested language. Keep narration per scene short, and every visual keyword and image prompt in English."},
+                            {"role": "system", "content": "Write an accurate, engaging documentary script with a natural number of scenes fitted to the target runtime. Aim for 3–7 seconds per scene; use English visual keywords and image prompts."},
                             {"role": "user", "content": prompt},
                         ],
                     },

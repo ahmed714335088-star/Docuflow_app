@@ -1,6 +1,5 @@
 import asyncio
 import json
-import math
 import re
 import shutil
 from collections import Counter
@@ -21,14 +20,8 @@ STAGES = [
     ("subtitles", "مزامنة الترجمات العربية"),
     ("render", "تصيير الفيديو النهائي"),
 ]
-SCENE_TARGET_SECONDS = 3.3
 VOICE_PAUSE_SECONDS = 0.4
 TRANSITION_SECONDS = 0.22
-
-
-def _scene_count_for_duration(requested_seconds: int) -> int:
-    shortest_interval = SCENE_TARGET_SECONDS - TRANSITION_SECONDS
-    return max(1, math.floor((requested_seconds - TRANSITION_SECONDS) / shortest_interval))
 
 
 def _scene_duration_for_audio(speech_seconds: float) -> float:
@@ -98,15 +91,14 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
 
         language_name = "العربية" if request.video_language == "ar" else "الإنجليزية"
         requested_seconds = int(request.duration_minutes) * 60
-        scene_count = _scene_count_for_duration(requested_seconds)
-        scene_interval = (requested_seconds - TRANSITION_SECONDS) / scene_count
+        scene_count = None
         await step(0, f"نكتب خطافاً وسيناريو من مشاهد قصيرة باللغة {language_name}.")
         script = await generate_script(
             topic, request.provider, keys, request.video_language, request.aspect_ratio, scene_count, requested_seconds
         )
         scenes = script["scenes"]
-        if len(scenes) != scene_count:
-            raise RuntimeError(f"يتطلب الفيديو {scene_count} مشهداً لضبط مدته إلى {request.duration_minutes} دقيقة.")
+        if not scenes:
+            raise RuntimeError("لم يُرجع كاتب السيناريو أي مشاهد صالحة.")
         audio_paths: list[Path] = []
         speech_durations: list[float] = []
         scene_durations: list[float] = []
@@ -298,7 +290,7 @@ async def run_pipeline(job_id: str, request: GenerateRequest, topics: list[str],
             "pixabay_image_ids": sorted(used_image_ids),
             "commons_visual_credits": visual_credits,
             "scene_count": len(scenes),
-            "scene_interval_seconds": round(scene_interval, 4),
+            "scene_interval_seconds": round(sum(scene_durations) / len(scene_durations), 4),
             "scene_durations_seconds": [round(value, 2) for value in scene_durations],
             "scene_speech_durations_seconds": [round(value, 2) for value in speech_durations],
             "visual_warnings": visual_warnings,

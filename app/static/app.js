@@ -5,6 +5,7 @@
   const keyIds = ["groq-key", "gemini-key", "claude-key", "pixabay-key"];
   let aspectRatio = "16:9";
   let toastTimer;
+  let geminiConsentTouched = false;
 
   function toast(message, error = false) {
     const box = $("#toast");
@@ -49,11 +50,11 @@
 
   function updateDurationLabel() {
     const minutes = Number($("#duration-minutes").value || 1);
-    const transition = 0.22;
-    const scenes = Math.max(1, Math.floor((minutes * 60 - transition) / (3.3 - transition)));
-    const interval = (minutes * 60 - transition) / scenes;
-    $("#scene-duration-chip").innerHTML = `${scenes} مشهداً <i></i> ${interval.toFixed(2)} ث للمشهد · صمت 0.5 ث`;
-    $("#duration-note").textContent = `${scenes} مشهداً · ${minutes} ${minutes === 1 ? "دقيقة" : "دقائق"} · حتى 8 موضوعات`;
+    const target = minutes * 60;
+    const low = Math.ceil(target / 7);
+    const high = Math.ceil(target / 3);
+    $("#scene-duration-chip").innerHTML = `مشاهد طبيعية <i></i> 3–7 ث للمشهد`;
+    $("#duration-note").textContent = `${minutes} ${minutes === 1 ? "دقيقة" : "دقائق"} · يحدد السيناريو عدد المشاهد · تقريباً ${low}–${high} مشهداً · حتى 8 موضوعات`;
   }
 
   function loadSettings() {
@@ -68,6 +69,8 @@
       $("#gemini-key").value = values.gemini || "";
       $("#claude-key").value = values.claude || "";
       $("#pixabay-key").value = values.pixabay || "";
+      geminiConsentTouched = values.allow_gemini_images_explicit === true;
+      $("#allow-gemini-images").checked = geminiConsentTouched ? Boolean(values.allow_gemini_images) : Boolean(values.gemini);
       if (values.provider) {
         const radio = $(`input[name="provider"][value="${values.provider}"]`);
         if (radio) radio.checked = true;
@@ -90,6 +93,8 @@
       duration_minutes: Number($("#duration-minutes").value),
       voice: $("#voice").value,
       voice_rate: Number($("#voice-rate").value),
+      allow_gemini_images: $("#allow-gemini-images").checked,
+      allow_gemini_images_explicit: geminiConsentTouched,
     };
     localStorage.setItem("docuflow.keys.v1", JSON.stringify(values));
     $("#settings-feedback").textContent = "حُفظت الإعدادات في هذا المتصفح.";
@@ -250,6 +255,7 @@
           video_language: $("#video-language").value,
           voice: $("#voice").value,
           voice_rate: Number($("#voice-rate").value),
+      allow_gemini_images: $("#allow-gemini-images").checked,
           provider,
           allow_gemini_images: allowGeminiImages,
           keys: keysFromInputs(),
@@ -259,7 +265,6 @@
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "تعذر بدء الإنتاج.");
-      if (allowGeminiImages) $("#allow-gemini-images").checked = false;
       updateProviderHint();
       $("#progress-message").textContent = "بدأ خط الإنتاج — جارٍ إعداد السيناريو.";
       pollJob(data.job_id);
@@ -314,7 +319,14 @@
     button.classList.add("selected"); aspectRatio = button.dataset.ratio;
   }));
   $$('input[name="provider"]').forEach(radio => radio.addEventListener("change", () => { updateProviderHint(); saveSettings(false); }));
-  keyIds.forEach(id => $(`#${id}`).addEventListener("input", updateProviderHint));
+  keyIds.forEach(id => $(`#${id}`).addEventListener("input", () => {
+    if (id === "gemini-key" && $(`#${id}`).value.trim()) {
+      let saved = {}; try { saved = JSON.parse(localStorage.getItem("docuflow.keys.v1") || "{}"); } catch (_) {}
+      if (!geminiConsentTouched) $("#allow-gemini-images").checked = true;
+    }
+    updateProviderHint();
+    saveSettings(false);
+  }));
   $("#video-language").addEventListener("change", () => {
     updateVoiceOptions();
     updateProviderHint();
@@ -326,7 +338,7 @@
     saveSettings(false);
   });
   $("#voice").addEventListener("change", () => saveSettings(false));
-  $("#allow-gemini-images").addEventListener("change", updateProviderHint);
+  $("#allow-gemini-images").addEventListener("change", () => { geminiConsentTouched = true; updateProviderHint(); saveSettings(false); });
   $("#voice-rate").addEventListener("input", () => { updateVoiceRateLabel(); saveSettings(false); });
   $("#save-settings").addEventListener("click", () => saveSettings(true));
   $("#clear-settings").addEventListener("click", () => {

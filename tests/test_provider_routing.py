@@ -9,7 +9,7 @@ import httpx
 
 from app.models import ApiKeys, GenerateRequest
 from app.media import make_voiceover
-from app.pipeline import VOICE_PAUSE_SECONDS, _scene_count_for_duration, _scene_duration_for_audio
+from app.pipeline import VOICE_PAUSE_SECONDS, _scene_duration_for_audio
 from app.providers import (
     _discover_claude_sonnet_models,
     _extract_json_payload,
@@ -27,18 +27,6 @@ from app.providers import (
 
 
 class ProviderRoutingTests(unittest.TestCase):
-    def test_scene_schedule_matches_all_selected_runtimes_and_keeps_voice_gap(self) -> None:
-        expected_scene_counts = {1: 19, 3: 58, 5: 97, 10: 194}
-        for minutes, expected_count in expected_scene_counts.items():
-            requested_seconds = minutes * 60
-            scene_count = _scene_count_for_duration(requested_seconds)
-            interval = (requested_seconds - 0.22) / scene_count
-            speech_budget = interval - VOICE_PAUSE_SECONDS
-            self.assertEqual(scene_count, expected_count)
-            self.assertAlmostEqual(scene_count * interval + 0.22, requested_seconds, places=8)
-            self.assertGreaterEqual(speech_budget, 2.5)
-            self.assertAlmostEqual(interval - speech_budget, 0.4, places=8)
-
     def test_long_voiceover_extends_scene_without_fixed_speech_budget(self) -> None:
         for speech_seconds in (2.65, 4.2, 12.0):
             self.assertAlmostEqual(_scene_duration_for_audio(speech_seconds), speech_seconds + 0.4)
@@ -74,6 +62,7 @@ class ProviderRoutingTests(unittest.TestCase):
         self.assertIn("about 60 seconds long", exact_duration_prompt)
         self.assertIn("0.4 second pause", exact_duration_prompt)
         self.assertNotIn("2.6 seconds", exact_duration_prompt)
+        self.assertIn("natural number of scenes", exact_duration_prompt)
 
     def test_parser_requires_known_visual_type_per_scene(self) -> None:
         payload = {
@@ -90,6 +79,7 @@ class ProviderRoutingTests(unittest.TestCase):
         import json
         parsed = _parse_json(json.dumps(payload), "en", "16:9", 1)
         self.assertEqual(parsed["scenes"][0]["visual_type"], "stock_video")
+        self.assertEqual(len(_parse_json(json.dumps(payload), "en", "16:9")["scenes"]), 1)
         payload["scenes"][0]["visual_type"] = "generic_broll"
         with self.assertRaises(ValueError):
             _parse_json(json.dumps(payload), "en", "16:9", 1)
